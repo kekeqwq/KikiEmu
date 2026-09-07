@@ -4,154 +4,83 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="KikiEmu - Android 17 (16KB Page)" 
-        Height="760" Width="380"
+        Title="KikiEmu Viewport"
+        Width="430" Height="860"
+        MinWidth="320" MinHeight="480"
         WindowStartupLocation="CenterScreen"
-        Background="#18181b"
-        Foreground="#fafafa"
-        FontFamily="Segoe UI, sans-serif"
-        Topmost="True"
-        ShowActivated="True"
+        Background="#000000"
+        Foreground="#f1f5f9"
+        FontFamily="Segoe UI, -apple-system, Roboto, Helvetica, Arial, sans-serif"
+        WindowStyle="None"
+        AllowsTransparency="False"
+        ResizeMode="CanResizeWithGrip"
         KeyDown="Window_KeyDown"
-        KeyUp="Window_KeyUp">
+        MouseDown="Window_MouseDown"
+        PreviewTouchDown="Window_PreviewTouchDown"
+        PreviewTouchMove="Window_PreviewTouchMove"
+        PreviewTouchUp="Window_PreviewTouchUp">
 
-    <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="46" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="36" />
-        </Grid.RowDefinitions>
+    <Grid x:Name="RootGrid" Background="#000000">
+        <!-- ========================================================================= -->
+        <!-- Native Android Display Viewport (纯显示画布，1:1 点对点显示 Android 真实系统)  -->
+        <!-- ========================================================================= -->
+        <Viewbox x:Name="ViewportBox" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Grid x:Name="ViewportContainer" Width="1080" Height="2400" Background="#000000">
+                <!-- Native Render Output Host (VirtIO-GPU / DRM / Framebuffer Direct Surface) -->
+                <Image x:Name="NativeDisplayImage" 
+                       Stretch="Fill" 
+                       RenderOptions.BitmapScalingMode="NearestNeighbor"
+                       RenderOptions.EdgeMode="Aliased" />
 
-        <!-- Fluent Titlebar & Mode Bar -->
-        <Grid Grid.Row="0" Background="#27272a">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
+                <!-- Boot / Connecting Screen (仅在底层原生画面未就绪时显示) -->
+                <Grid x:Name="BootSplashGrid" Background="#050811" Visibility="Visible" MouseDown="BootSplashGrid_MouseDown" Cursor="Hand">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="800">
+                        <!-- Android 17 Clean Monogram -->
+                        <Border Width="80" Height="80" CornerRadius="24" Background="#10b981" HorizontalAlignment="Center" Margin="0,0,0,24">
+                            <TextBlock Text="17" FontSize="42" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        
+                        <TextBlock Text="Android 17" FontSize="26" FontWeight="SemiBold" Foreground="#f8fafc" HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                        <TextBlock Text="Snapdragon X Elite Oryon • ARM64 Native" FontSize="13" Foreground="#94a3b8" HorizontalAlignment="Center" Margin="0,0,0,20"/>
+                        
+                        <ProgressBar IsIndeterminate="True" Width="240" Height="4" Background="#1e293b" Foreground="#10b981" BorderThickness="0" Margin="0,0,0,16"/>
+                        
+                        <!-- 实时主状态 -->
+                        <TextBlock x:Name="BootStatusText" Text="正在点亮原生渲染总线..." FontSize="13" FontWeight="Medium" Foreground="#38bdf8" HorizontalAlignment="Center" Margin="0,0,0,6"/>
+                        
+                        <!-- 详细阶段提示 -->
+                        <TextBlock x:Name="BootDetailText" Text="正在准备存储与内核..." FontSize="11" Foreground="#64748b" HorizontalAlignment="Center" Margin="0,0,0,24"/>
 
-            <!-- Brand Icon & Title -->
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
-                <Border Width="22" Height="22" CornerRadius="6" Background="#6366f1" Margin="0,0,10,0">
-                    <TextBlock Text="K" Foreground="White" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Border>
-                <TextBlock x:Name="TitleTextBlock" Text="KikiEmu - Android 17 (16KB Page)" FontWeight="SemiBold" FontSize="13" Foreground="#f4f4f5" VerticalAlignment="Center"/>
-                <Border Background="#3f3f46" CornerRadius="4" Margin="10,0,0,0" Padding="6,2">
-                    <TextBlock x:Name="ModeBadge" Text="竖屏手机" FontSize="10" Foreground="#38bdf8" FontWeight="Medium"/>
-                </Border>
-            </StackPanel>
-
-            <!-- Titlebar Actions -->
-            <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="0,0,10,0" VerticalAlignment="Center">
-                <Button x:Name="FullscreenBtn" Width="32" Height="32" Background="#3f3f46" Foreground="White" BorderThickness="0"
-                        Click="FullscreenBtn_Click" ToolTip="平板全屏模式 (F11)">
-                    <Button.Resources>
-                        <Style TargetType="Border">
-                            <Setter Property="CornerRadius" Value="4"/>
-                        </Style>
-                    </Button.Resources>
-                    <TextBlock Text="⛶" FontSize="13" Foreground="#e4e4e7" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Button>
-            </StackPanel>
-        </Grid>
-
-        <!-- Main Display / Viewport Area -->
-        <Grid Grid.Row="1" Background="#09090b">
-            <!-- Running Emulator Container -->
-            <Border x:Name="DisplayContainer" Background="#000000" Focusable="True"
-                    TouchDown="DisplayContainer_TouchDown"
-                    TouchMove="DisplayContainer_TouchMove"
-                    TouchUp="DisplayContainer_TouchUp"
-                    MouseDown="DisplayContainer_MouseDown">
-                
-                <!-- Display Canvas / Android Viewport Mockup & Status -->
-                <Grid>
-                    <!-- Simulated Android 17 Lockscreen / Desktop Surface -->
-                    <Border Background="#0f172a" Margin="8" CornerRadius="16" BorderBrush="#334155" BorderThickness="2">
-                        <Grid>
-                            <!-- Android Status Bar -->
-                            <DockPanel VerticalAlignment="Top" Margin="16,12,16,0">
-                                <TextBlock Text="12:00" Foreground="#e2e8f0" FontWeight="SemiBold" FontSize="12" DockPanel.Dock="Left"/>
-                                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
-                                    <TextBlock Text="5G  " Foreground="#e2e8f0" FontSize="11" FontWeight="Bold"/>
-                                    <TextBlock Text="100%" Foreground="#e2e8f0" FontSize="11" FontWeight="Medium"/>
-                                </StackPanel>
-                            </DockPanel>
-
-                            <!-- Center Android 17 Brand & Hyper-V Engine Badge -->
-                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <Border Width="72" Height="72" CornerRadius="36" Background="#10b981" HorizontalAlignment="Center" Margin="0,0,0,16">
-                                    <TextBlock Text="17" Foreground="White" FontWeight="Bold" FontSize="32" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Border>
-                                <TextBlock Text="Android 17" FontSize="20" FontWeight="Bold" Foreground="#f8fafc" HorizontalAlignment="Center"/>
-                                <TextBlock Text="16KB Page Size GKI" FontSize="13" Foreground="#34d399" HorizontalAlignment="Center" Margin="0,4,0,12"/>
-
-                                <Border Background="#1e293b" CornerRadius="8" Padding="12,8" Margin="0,8,0,0" BorderBrush="#475569" BorderThickness="1">
-                                    <StackPanel>
-                                        <TextBlock Text="✓ Windows 11 Hyper-V MicroVM 运行中" FontSize="11" Foreground="#38bdf8" FontWeight="SemiBold"/>
-                                        <TextBlock Text="✓ 骁龙 X Elite (Oryon 6 Cores) 直通" FontSize="11" Foreground="#94a3b8" Margin="0,2,0,0"/>
-                                        <TextBlock Text="✓ 物理硬件键盘完全直通" FontSize="11" Foreground="#94a3b8" Margin="0,2,0,0"/>
-                                        <TextBlock Text="✓ 120Hz V-Sync 高刷同步" FontSize="11" Foreground="#94a3b8" Margin="0,2,0,0"/>
-                                    </StackPanel>
-                                </Border>
-                            </StackPanel>
-
-                            <!-- Bottom Android Navigation Pill -->
-                            <Border Width="120" Height="4" Background="#64748b" CornerRadius="2" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,12"/>
-                        </Grid>
-                    </Border>
+                        <!-- 交互快捷操作提示 -->
+                        <Border Background="#111827" CornerRadius="6" Padding="12,6" HorizontalAlignment="Center" BorderBrush="#1f2937" BorderThickness="1">
+                            <TextBlock Text="💡 提示：点击屏幕任意处或按空格键可随时进入纯画布模式" FontSize="11" Foreground="#9ca3af" HorizontalAlignment="Center"/>
+                        </Border>
+                    </StackPanel>
                 </Grid>
-            </Border>
-
-            <!-- Empty State / Guide Panel (Shown when no default instance configured) -->
-            <Grid x:Name="EmptyStatePanel" Visibility="Collapsed" Background="#18181b">
-                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="320">
-                    <Border Width="64" Height="64" CornerRadius="16" Background="#312e81" HorizontalAlignment="Center" Margin="0,0,0,20">
-                        <TextBlock Text="📱" FontSize="30" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                    
-                    <TextBlock Text="尚未配置默认 Android 实例" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,0,0,10" Foreground="#f4f4f5"/>
-                    <TextBlock Text="KikiEmu 桌面端专注于极简启动与原生效能呈现，实例生命周期请在终端中管理：" 
-                               FontSize="12" Foreground="#a1a1aa" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,20" LineHeight="18"/>
-
-                    <Button Content="检查并重试启动" Height="38" Background="#4f46e5" Foreground="White" FontWeight="SemiBold"
-                            BorderThickness="0" Click="RetryCheckBtn_Click">
-                        <Button.Resources>
-                            <Style TargetType="Border">
-                                <Setter Property="CornerRadius" Value="6"/>
-                            </Style>
-                        </Button.Resources>
-                    </Button>
-                </StackPanel>
             </Grid>
+        </Viewbox>
 
-            <!-- Loading Spinner / Booting Overlay -->
-            <Grid x:Name="BootingOverlay" Visibility="Collapsed" Background="#e0000000">
-                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <ProgressBar IsIndeterminate="True" Width="180" Height="4" Margin="0,0,0,16" Foreground="#6366f1" Background="#27272a" BorderThickness="0"/>
-                    <TextBlock x:Name="BootingStatusText" Text="正在调起 ARM64 虚拟化硬件..." FontSize="13" Foreground="#d4d4d8" HorizontalAlignment="Center"/>
+        <!-- ========================================================================= -->
+        <!-- Floating Test Diagnostics HUD (按 F12 或 Ctrl+H 开关，不干扰纯粹沉浸式显示)        -->
+        <!-- ========================================================================= -->
+        <Border x:Name="DiagnosticsHud"
+                HorizontalAlignment="Right" VerticalAlignment="Top"
+                Margin="16" Padding="14,10"
+                Background="#cc090d16" CornerRadius="12"
+                BorderBrush="#334155" BorderThickness="1"
+                Visibility="Visible"
+                IsHitTestVisible="False">
+            <StackPanel Orientation="Vertical">
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <Border Width="8" Height="8" CornerRadius="4" Background="#10b981" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <TextBlock Text="KikiEmu Native Viewport" FontSize="11" FontWeight="Bold" Foreground="#f1f5f9"/>
                 </StackPanel>
-            </Grid>
-        </Grid>
-
-        <!-- Bottom Status Bar -->
-        <Grid Grid.Row="2" Background="#1c1917">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-
-            <!-- Peripheral & Input Status -->
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
-                <TextBlock Text="⌨️ 物理外设键盘: " FontSize="11" Foreground="#78716c"/>
-                <TextBlock x:Name="KeyboardStatusText" Text="已直通" FontSize="11" Foreground="#22c55e" FontWeight="SemiBold"/>
-                <TextBlock Text="  |  👆 10点触控" FontSize="11" Foreground="#78716c" Margin="6,0,0,0"/>
+                <TextBlock x:Name="HudResolutionText" Text="Mode: 1080x2400 (Phone 9:20)" FontSize="10" Foreground="#94a3b8" Margin="0,1"/>
+                <TextBlock x:Name="HudRefreshText" Text="Refresh: 120Hz Point-to-Point" FontSize="10" Foreground="#38bdf8" Margin="0,1"/>
+                <TextBlock x:Name="HudArchText" Text="Core: Oryon Direct Pass-through" FontSize="10" Foreground="#34d399" Margin="0,1"/>
+                <TextBlock x:Name="HudKernelText" Text="Kernel: Linux 7.3 Mainline (16K Page)" FontSize="10" Foreground="#a78bfa" Margin="0,1"/>
+                <TextBlock Text="[Space/Click] 切换蒙版  [F11] 全屏  [F12] 开关HUD" FontSize="9" Foreground="#64748b" Margin="0,4,0,0"/>
             </StackPanel>
-
-            <!-- Refresh Rate & Mode -->
-            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
-                <TextBlock Text="⚡ 120Hz V-Sync" FontSize="11" Foreground="#a855f7" FontWeight="SemiBold"/>
-            </StackPanel>
-        </Grid>
+        </Border>
     </Grid>
 </Window>
