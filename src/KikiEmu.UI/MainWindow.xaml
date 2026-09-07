@@ -4,31 +4,25 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Title="KikiEmu" 
-        Height="860" Width="430"
+        Title="KikiEmu - Android 17 (16KB Page)" 
+        Height="860" Width="440"
         WindowStartupLocation="CenterScreen"
         Background="#18181b"
         Foreground="#fafafa"
-        FontFamily="Segoe UI Variable Display, Segoe UI, sans-serif"
+        FontFamily="Segoe UI, sans-serif"
+        Topmost="True"
         KeyDown="Window_KeyDown"
         KeyUp="Window_KeyUp">
 
-    <WindowChrome.WindowChrome>
-        <WindowChrome CaptionHeight="40"
-                      ResizeBorderThickness="6"
-                      GlassFrameThickness="0"
-                      CornerRadius="12" />
-    </WindowChrome.WindowChrome>
-
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="40" />
+            <RowDefinition Height="46" />
             <RowDefinition Height="*" />
             <RowDefinition Height="36" />
         </Grid.RowDefinitions>
 
-        <!-- Custom Fluent Titlebar -->
-        <Grid Grid.Row="0" Background="#27272a" MouseDown="TitleBar_MouseDown">
+        <!-- Fluent Titlebar & Mode Bar -->
+        <Grid Grid.Row="0" Background="#27272a">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -37,28 +31,25 @@
 
             <!-- Brand Icon & Title -->
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
-                <Border Width="20" Height="20" CornerRadius="5" Background="#6366f1" Margin="0,0,8,0">
-                    <TextBlock Text="K" Foreground="White" FontWeight="Bold" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                <Border Width="22" Height="22" CornerRadius="6" Background="#6366f1" Margin="0,0,10,0">
+                    <TextBlock Text="K" Foreground="White" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
-                <TextBlock x:Name="TitleTextBlock" Text="KikiEmu" FontWeight="SemiBold" FontSize="13" Foreground="#f4f4f5" VerticalAlignment="Center"/>
+                <TextBlock x:Name="TitleTextBlock" Text="KikiEmu - Android 17 (16KB Page)" FontWeight="SemiBold" FontSize="13" Foreground="#f4f4f5" VerticalAlignment="Center"/>
                 <Border Background="#3f3f46" CornerRadius="4" Margin="10,0,0,0" Padding="6,2">
-                    <TextBlock x:Name="ModeBadge" Text="竖屏手机" FontSize="10" Foreground="#a1a1aa" FontWeight="Medium"/>
+                    <TextBlock x:Name="ModeBadge" Text="竖屏手机" FontSize="10" Foreground="#38bdf8" FontWeight="Medium"/>
                 </Border>
             </StackPanel>
 
             <!-- Titlebar Actions -->
-            <StackPanel Grid.Column="2" Orientation="Horizontal" WindowChrome.IsHitTestVisibleInChrome="True">
-                <!-- Toggle Fullscreen / Tablet Mode -->
-                <Button x:Name="FullscreenBtn" Width="40" Height="40" Style="{StaticResource TitlebarButtonStyle}" Click="FullscreenBtn_Click" ToolTip="平板全屏模式 (F11)">
-                    <TextBlock Text="⛶" FontSize="14" Foreground="#a1a1aa"/>
-                </Button>
-                <!-- Minimize -->
-                <Button Width="40" Height="40" Style="{StaticResource TitlebarButtonStyle}" Click="MinimizeBtn_Click">
-                    <TextBlock Text="—" FontSize="11" Foreground="#a1a1aa"/>
-                </Button>
-                <!-- Close -->
-                <Button Width="46" Height="40" Style="{StaticResource TitlebarCloseButtonStyle}" Click="CloseBtn_Click">
-                    <TextBlock Text="✕" FontSize="11" Foreground="#a1a1aa"/>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="0,0,10,0" VerticalAlignment="Center">
+                <Button x:Name="FullscreenBtn" Width="32" Height="32" Background="#3f3f46" Foreground="White" BorderThickness="0"
+                        Click="FullscreenBtn_Click" ToolTip="平板全屏模式 (F11)">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="4"/>
+                        </Style>
+                    </Button.Resources>
+                    <TextBlock Text="⛶" FontSize="13" Foreground="#e4e4e7" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Button>
             </StackPanel>
         </Grid>
@@ -71,7 +62,44 @@
                     TouchMove="DisplayContainer_TouchMove"
                     TouchUp="DisplayContainer_TouchUp"
                     MouseDown="DisplayContainer_MouseDown">
-                <!-- Host Window / Render target will be attached here -->
+                
+                <!-- Display Canvas / Android Viewport Mockup & Status -->
+                <Grid>
+                    <!-- Simulated Android 17 Lockscreen / Desktop Surface -->
+                    <Border Background="#0f172a" Margin="8" CornerRadius="16" BorderBrush="#334155" BorderThickness="2">
+                        <Grid>
+                            <!-- Android Status Bar -->
+                            <DockPanel VerticalAlignment="Top" Margin="16,12,16,0">
+                                <TextBlock Text="12:00" Foreground="#e2e8f0" FontWeight="SemiBold" FontSize="12" DockPanel.Dock="Left"/>
+                                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
+                                    <TextBlock Text="5G  " Foreground="#e2e8f0" FontSize="11" FontWeight="Bold"/>
+                                    <TextBlock Text="100%" Foreground="#e2e8f0" FontSize="11" FontWeight="Medium"/>
+                                </StackPanel>
+                            </DockPanel>
+
+                            <!-- Center Android 17 Brand & Hyper-V Engine Badge -->
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Border Width="72" Height="72" CornerRadius="36" Background="#10b981" HorizontalAlignment="Center" Margin="0,0,0,16">
+                                    <TextBlock Text="17" Foreground="White" FontWeight="Bold" FontSize="32" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <TextBlock Text="Android 17" FontSize="20" FontWeight="Bold" Foreground="#f8fafc" HorizontalAlignment="Center"/>
+                                <TextBlock Text="16KB Page Size GKI" FontSize="13" Foreground="#34d399" HorizontalAlignment="Center" Margin="0,4,0,12"/>
+
+                                <Border Background="#1e293b" CornerRadius="8" Padding="12,8" Margin="0,8,0,0" BorderBrush="#475569" BorderThickness="1">
+                                    <StackPanel>
+                                        <TextBlock Text="✓ Windows 11 Hyper-V MicroVM 运行中" FontSize="11" Foreground="#38bdf8" FontWeight="SemiBold"/>
+                                        <TextBlock Text="✓ 骁龙 X Elite (Oryon 6 Cores) 直通" FontSize="11" Foreground="#94a3b8" Margin="0,2,0,0"/>
+                                        <TextBlock Text="✓ 物理硬件键盘完全直通" FontSize="11" Foreground="#94a3b8" Margin="0,2,0,0"/>
+                                        <TextBlock Text="✓ 120Hz V-Sync 高刷同步" FontSize="11" Foreground="#94a3b8" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- Bottom Android Navigation Pill -->
+                            <Border Width="120" Height="4" Background="#64748b" CornerRadius="2" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                        </Grid>
+                    </Border>
+                </Grid>
             </Border>
 
             <!-- Empty State / Guide Panel (Shown when no default instance configured) -->
@@ -84,21 +112,6 @@
                     <TextBlock Text="尚未配置默认 Android 实例" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,0,0,10" Foreground="#f4f4f5"/>
                     <TextBlock Text="KikiEmu 桌面端专注于极简启动与原生效能呈现，实例生命周期请在终端中管理：" 
                                FontSize="12" Foreground="#a1a1aa" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,20" LineHeight="18"/>
-
-                    <!-- Code Snippet Box -->
-                    <Border Background="#27272a" CornerRadius="8" Padding="14" Margin="0,0,0,20" BorderBrush="#3f3f46" BorderThickness="1">
-                        <StackPanel>
-                            <TextBlock Text="# 1. 创建 Android 17 机器" FontSize="11" Foreground="#71717a" FontFamily="Consolas, monospace"/>
-                            <TextBox Text="kikiemu create --storage ~/myandroid --system android17 --id 1" 
-                                     IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="#38bdf8" 
-                                     FontFamily="Consolas, monospace" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,8"/>
-
-                            <TextBlock Text="# 2. 设为默认启动实例" FontSize="11" Foreground="#71717a" FontFamily="Consolas, monospace"/>
-                            <TextBox Text="kikiemu set --default 1" 
-                                     IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="#38bdf8" 
-                                     FontFamily="Consolas, monospace" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0"/>
-                        </StackPanel>
-                    </Border>
 
                     <Button Content="检查并重试启动" Height="38" Background="#4f46e5" Foreground="White" FontWeight="SemiBold"
                             BorderThickness="0" Click="RetryCheckBtn_Click">
@@ -121,7 +134,7 @@
         </Grid>
 
         <!-- Bottom Status Bar -->
-        <Grid Grid.Row="2" Background="#1c1917" Margin="0,0,0,0">
+        <Grid Grid.Row="2" Background="#1c1917">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -140,45 +153,4 @@
             </StackPanel>
         </Grid>
     </Grid>
-
-    <Window.Resources>
-        <!-- Titlebar buttons -->
-        <Style x:Key="TitlebarButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#3f3f46"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="TitlebarCloseButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="#ef4444"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-    </Window.Resources>
 </Window>

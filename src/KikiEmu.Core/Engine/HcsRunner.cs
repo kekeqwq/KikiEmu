@@ -30,15 +30,40 @@ public class HcsRunner : IDisposable
         return runner;
     }
 
+    public static void CleanExistingSystem(string systemId)
+    {
+        try
+        {
+            var openHr = HcsInterop.HcsOpenComputeSystem(systemId, 0x10000000, out var existingSys);
+            if (openHr == 0 && existingSys != IntPtr.Zero)
+            {
+                var termOp = HcsInterop.HcsCreateOperation(IntPtr.Zero, IntPtr.Zero);
+                try
+                {
+                    HcsInterop.HcsTerminateComputeSystem(existingSys, termOp, null);
+                    HcsInterop.HcsWaitForOperationResult(termOp, 2000, out _);
+                }
+                finally
+                {
+                    HcsInterop.HcsCloseOperation(termOp);
+                    HcsInterop.HcsCloseComputeSystem(existingSys);
+                }
+            }
+        }
+        catch { }
+    }
+
     public void Start(InstanceInfo instance)
     {
+        // Always ensure any stale system with this ID is terminated
+        CleanExistingSystem(_systemId);
+
         var storage = instance.StoragePath;
         var kernelPath = Path.Combine(storage, "kernel");
         var ramdiskPath = Path.Combine(storage, "ramdisk.img");
 
         if (!File.Exists(kernelPath))
         {
-            // If named kernel-ranchu, ensure uncompressed Image or kernel exists
             var ranchu = Path.Combine(storage, "kernel-ranchu");
             if (File.Exists(ranchu))
             {
@@ -55,43 +80,6 @@ public class HcsRunner : IDisposable
         if (File.Exists(ramdiskPath))
         {
             GrantVmPermissions(ramdiskPath);
-        }
-
-        // Attach SCSI disks if VHDX files exist
-        var scsiAttachments = new Dictionary<string, object>();
-        var userdataVhdx = Path.Combine(storage, "userdata.vhdx");
-        if (File.Exists(userdataVhdx))
-        {
-            GrantVmPermissions(userdataVhdx);
-            scsiAttachments["0"] = new
-            {
-                Path = userdataVhdx,
-                Type = "VirtualDisk"
-            };
-        }
-
-        var systemVhdx = Path.Combine(storage, "system.vhdx");
-        if (File.Exists(systemVhdx))
-        {
-            GrantVmPermissions(systemVhdx);
-            scsiAttachments["1"] = new
-            {
-                Path = systemVhdx,
-                Type = "VirtualDisk",
-                ReadOnly = true
-            };
-        }
-
-        var devices = new Dictionary<string, object>();
-        if (scsiAttachments.Count > 0)
-        {
-            devices["Scsi"] = new Dictionary<string, object>
-            {
-                ["0"] = new
-                {
-                    Attachments = scsiAttachments
-                }
-            };
         }
 
         var hcsConfig = new Dictionary<string, object>
@@ -114,8 +102,7 @@ public class HcsRunner : IDisposable
                 {
                     Memory = new { SizeInMB = instance.MemoryMb },
                     Processor = new { Count = instance.CpuCores }
-                },
-                ["Devices"] = devices
+                }
             }
         };
 

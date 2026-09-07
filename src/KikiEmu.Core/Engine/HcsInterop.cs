@@ -35,6 +35,12 @@ public static class HcsInterop
         out IntPtr computeSystem);
 
     [DllImport(ComputeCoreDll, ExactSpelling = true, CharSet = CharSet.Unicode)]
+    public static extern int HcsOpenComputeSystem(
+        string id,
+        uint requestedAccess,
+        out IntPtr computeSystem);
+
+    [DllImport(ComputeCoreDll, ExactSpelling = true, CharSet = CharSet.Unicode)]
     public static extern int HcsStartComputeSystem(
         IntPtr computeSystem,
         IntPtr operation,
