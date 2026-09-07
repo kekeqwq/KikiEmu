@@ -158,4 +158,4 @@ dotnet publish src/KikiEmu.UI/KikiEmu.UI.csproj -c Release -r win-arm64 --self-c
 
 ## 📄 开源许可证
 
-本项目遵循 [MIT License](LICENSE)。
+本项目遵循 [GNU General Public License v3.0 (GPL-3.0)](LICENSE)。
