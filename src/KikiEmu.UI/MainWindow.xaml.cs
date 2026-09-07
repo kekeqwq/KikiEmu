@@ -18,30 +18,20 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
-        try
-        {
-            File.AppendAllText("ui_trace.log", $"[{DateTime.Now:HH:mm:ss.fff}] MainWindow constructor start\n");
-            InitializeComponent();
-            File.AppendAllText("ui_trace.log", $"[{DateTime.Now:HH:mm:ss.fff}] MainWindow InitializeComponent complete\n");
-            Loaded += MainWindow_Loaded;
-            Closing += MainWindow_Closing;
-        }
-        catch (Exception ex)
-        {
-            File.AppendAllText("ui_trace.log", $"[{DateTime.Now:HH:mm:ss.fff}] InitializeComponent EXCEPTION: {ex}\n");
-            throw;
-        }
+        InitializeComponent();
+        Loaded += MainWindow_Loaded;
+        Closing += MainWindow_Closing;
     }
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        File.AppendAllText("ui_trace.log", $"[{DateTime.Now:HH:mm:ss.fff}] MainWindow_Loaded start\n");
+        Activate();
+        Focus();
         InitializeEmulatorSession();
     }
 
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        File.AppendAllText("ui_trace.log", $"[{DateTime.Now:HH:mm:ss.fff}] MainWindow_Closing\n");
         if (_hcsRunner != null)
         {
             try
@@ -59,7 +49,6 @@ public partial class MainWindow : Window
         if (string.IsNullOrEmpty(config.DefaultInstanceId) ||
             !config.Instances.TryGetValue(config.DefaultInstanceId, out var instance))
         {
-            File.AppendAllText("ui_trace.log", $"[{DateTime.Now:HH:mm:ss.fff}] No default instance\n");
             EmptyStatePanel.Visibility = Visibility.Visible;
             BootingOverlay.Visibility = Visibility.Collapsed;
             TitleTextBlock.Text = "KikiEmu - 待配置";
@@ -72,14 +61,12 @@ public partial class MainWindow : Window
         BootingStatusText.Text = $"正在启动 Hyper-V MicroVM [{instance.Id}] {instance.SystemId}...";
         TitleTextBlock.Text = $"KikiEmu - [{instance.Id}] {instance.SystemId}";
 
-        File.AppendAllText("ui_trace.log", $"[{DateTime.Now:HH:mm:ss.fff}] Launching HcsRunner for instance {instance.Id}\n");
         Task.Run(async () =>
         {
             try
             {
                 var runner = HcsRunner.LaunchInstance(_currentInstance);
                 _hcsRunner = runner;
-                File.AppendAllText("ui_trace.log", $"[{DateTime.Now:HH:mm:ss.fff}] HcsRunner launched successfully\n");
 
                 await Dispatcher.InvokeAsync(() =>
                 {
@@ -89,7 +76,6 @@ public partial class MainWindow : Window
             }
             catch (Exception ex)
             {
-                File.AppendAllText("ui_trace.log", $"[{DateTime.Now:HH:mm:ss.fff}] HcsRunner launch failed: {ex.Message}\n");
                 await Dispatcher.InvokeAsync(() =>
                 {
                     BootingOverlay.Visibility = Visibility.Collapsed;
@@ -104,34 +90,9 @@ public partial class MainWindow : Window
         InitializeEmulatorSession();
     }
 
-    private void TitleBar_MouseDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ChangedButton == MouseButton.Left)
-        {
-            if (e.ClickCount == 2)
-            {
-                ToggleTabletFullscreen();
-            }
-            else
-            {
-                DragMove();
-            }
-        }
-    }
-
     private void FullscreenBtn_Click(object sender, RoutedEventArgs e)
     {
         ToggleTabletFullscreen();
-    }
-
-    private void MinimizeBtn_Click(object sender, RoutedEventArgs e)
-    {
-        WindowState = WindowState.Minimized;
-    }
-
-    private void CloseBtn_Click(object sender, RoutedEventArgs e)
-    {
-        Close();
     }
 
     private void ToggleTabletFullscreen()

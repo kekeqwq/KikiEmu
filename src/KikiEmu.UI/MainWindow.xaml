@@ -5,12 +5,13 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="KikiEmu - Android 17 (16KB Page)" 
-        Height="860" Width="440"
+        Height="760" Width="380"
         WindowStartupLocation="CenterScreen"
         Background="#18181b"
         Foreground="#fafafa"
         FontFamily="Segoe UI, sans-serif"
         Topmost="True"
+        ShowActivated="True"
         KeyDown="Window_KeyDown"
         KeyUp="Window_KeyUp">
 
@@ -104,7 +105,7 @@
 
             <!-- Empty State / Guide Panel (Shown when no default instance configured) -->
             <Grid x:Name="EmptyStatePanel" Visibility="Collapsed" Background="#18181b">
-                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="360">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Width="320">
                     <Border Width="64" Height="64" CornerRadius="16" Background="#312e81" HorizontalAlignment="Center" Margin="0,0,0,20">
                         <TextBlock Text="📱" FontSize="30" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
