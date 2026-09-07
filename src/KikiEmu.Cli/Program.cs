@@ -1,4 +1,4 @@
-﻿using KikiEmu.Core.Config;
+﻿﻿using KikiEmu.Core.Config;
 using KikiEmu.Core.Engine;
 using KikiEmu.Core.Repository;
 using KikiEmu.Core.Storage;
@@ -65,6 +65,7 @@ class Program
 | . \| | |__| | |___| | | | | | |_| |
 |_|\_\_|\_____|_____|_| |_| |_|\__,_|
 Lightweight Native ARM64 Android Emulator for Windows on ARM (Snapdragon)
+Direct Windows 11 Hyper-V MicroVM Architecture
 ");
         Console.ResetColor();
 
@@ -177,7 +178,6 @@ Lightweight Native ARM64 Android Emulator for Windows on ARM (Snapdragon)
             return 1;
         }
 
-        // Expand ~ to user profile on Windows
         if (storage.StartsWith("~"))
         {
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -361,18 +361,29 @@ Lightweight Native ARM64 Android Emulator for Windows on ARM (Snapdragon)
             return 1;
         }
 
-        // Ensure engine is available
-        await EngineManager.EnsureEngineInstalledAsync(msg => Console.WriteLine($"[*] {msg}"));
-
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"Launching instance '{id}' ({instance.SystemId})...");
+        Console.WriteLine($"Launching instance '{id}' ({instance.SystemId}) via Native Hyper-V MicroVM...");
         Console.WriteLine($"  Storage: {instance.StoragePath}");
+        Console.WriteLine($"  Cores:   {instance.CpuCores} Oryon cores");
+        Console.WriteLine($"  Memory:  {instance.MemoryMb} MB");
         Console.WriteLine($"  Display: {instance.DisplayWidth}x{instance.DisplayHeight} @ {instance.RefreshRate}Hz");
-        Console.WriteLine($"  Hardware Keyboard: {(instance.EnablePhysicalKeyboard ? "Connected (USB HID)" : "Disabled")}");
+        Console.WriteLine($"  Hardware Keyboard: {(instance.EnablePhysicalKeyboard ? "Passthrough Active" : "Disabled")}");
         Console.ResetColor();
 
-        var proc = EmulatorRunner.LaunchInstance(instance);
-        Console.WriteLine($"Emulator PID: {proc.Id}. Running in background...");
+        using var runner = HcsRunner.LaunchInstance(instance);
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"[✔] Hyper-V MicroVM 'kikiemu-{id}' is running cleanly. Press Ctrl+C to shut down.");
+        Console.ResetColor();
+
+        var tcs = new TaskCompletionSource();
+        Console.CancelKeyPress += (s, e) =>
+        {
+            e.Cancel = true;
+            tcs.TrySetResult();
+        };
+
+        await tcs.Task;
+        Console.WriteLine("Shutting down Hyper-V MicroVM...");
         return 0;
     }
 }

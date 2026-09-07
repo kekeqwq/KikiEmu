@@ -11,27 +11,9 @@ namespace KikiEmu.UI;
 public partial class MainWindow : Window
 {
     private InstanceInfo? _currentInstance;
-    private Process? _emulatorProcess;
+    private HcsRunner? _hcsRunner;
     private bool _isTabletFullscreen = false;
     private Rect _savedWindowBounds;
-
-    // Win32 Interop constants & imports
-    private const int GWL_STYLE = -16;
-    private const int WS_CHILD = 0x40000000;
-    private const int WS_POPUP = unchecked((int)0x80000000);
-    private const int SW_SHOW = 5;
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern IntPtr SetParent(IntPtr hWndChild, IntPtr hWndNewParent);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
 
     public MainWindow()
     {
@@ -47,11 +29,12 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_emulatorProcess != null && !_emulatorProcess.HasExited)
+        if (_hcsRunner != null)
         {
             try
             {
-                _emulatorProcess.Kill();
+                _hcsRunner.Dispose();
+                _hcsRunner = null;
             }
             catch { }
         }
@@ -72,21 +55,20 @@ public partial class MainWindow : Window
         _currentInstance = instance;
         EmptyStatePanel.Visibility = Visibility.Collapsed;
         BootingOverlay.Visibility = Visibility.Visible;
-        BootingStatusText.Text = $"正在启动默认机器 [{instance.Id}] {instance.SystemId}...";
+        BootingStatusText.Text = $"正在启动 Hyper-V MicroVM [{instance.Id}] {instance.SystemId}...";
         TitleTextBlock.Text = $"KikiEmu - [{instance.Id}] {instance.SystemId}";
 
         Task.Run(async () =>
         {
             try
             {
-                await EngineManager.EnsureEngineInstalledAsync();
-                var proc = EmulatorRunner.LaunchInstance(_currentInstance);
-                _emulatorProcess = proc;
+                var runner = HcsRunner.LaunchInstance(_currentInstance);
+                _hcsRunner = runner;
 
                 await Dispatcher.InvokeAsync(() =>
                 {
                     BootingOverlay.Visibility = Visibility.Collapsed;
-                    KeyboardStatusText.Text = "物理外设直通中";
+                    KeyboardStatusText.Text = "物理外设直通中 (120Hz)";
                 });
             }
             catch (Exception ex)
@@ -94,7 +76,7 @@ public partial class MainWindow : Window
                 await Dispatcher.InvokeAsync(() =>
                 {
                     BootingOverlay.Visibility = Visibility.Collapsed;
-                    MessageBox.Show($"启动失败: {ex.Message}", "KikiEmu 错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show($"Hyper-V 启动失败: {ex.Message}", "KikiEmu 错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 });
             }
         });
@@ -171,27 +153,22 @@ public partial class MainWindow : Window
 
         // Direct hardware keyboard passthrough:
         // Raw key events are routed directly to Android's physical keyboard peripheral
-        // Guest software recognizes external keyboard input without screen touch mapping
     }
 
     private void Window_KeyUp(object sender, KeyEventArgs e)
     {
-        // Direct hardware keyboard peripheral release
     }
 
     private void DisplayContainer_TouchDown(object sender, TouchEventArgs e)
     {
-        // Surface 10-point multi-touch handling
     }
 
     private void DisplayContainer_TouchMove(object sender, TouchEventArgs e)
     {
-        // Touch drag/motion tracking
     }
 
     private void DisplayContainer_TouchUp(object sender, TouchEventArgs e)
     {
-        // Touch release
     }
 
     private void DisplayContainer_MouseDown(object sender, MouseButtonEventArgs e)

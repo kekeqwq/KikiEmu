@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text.Json;
 using KikiEmu.Core.Config;
+using KikiEmu.Core.Engine;
 using KikiEmu.Core.Repository;
 
 namespace KikiEmu.Core.Storage;
@@ -55,15 +56,25 @@ public class InstanceManager
         statusCallback?.Invoke($"Unpacking boot images to {fullStoragePath}...");
         ExtractArchiveToStorage(archivePath, fullStoragePath, statusCallback);
 
-        // 5. Ensure userdata.img exists
-        var userdataPath = Path.Combine(fullStoragePath, "userdata.img");
-        if (!File.Exists(userdataPath))
+        // 5. Ensure uncompressed kernel exists
+        var kernelDest = Path.Combine(fullStoragePath, "kernel");
+        var ranchu = Path.Combine(fullStoragePath, "kernel-ranchu");
+        if (File.Exists(ranchu) && !File.Exists(kernelDest))
         {
-            statusCallback?.Invoke("Initializing empty userdata disk (8 GB)...");
-            CreateEmptyDisk(userdataPath, 8L * 1024 * 1024 * 1024); // 8GB sparse
+            statusCallback?.Invoke("Decompressing ARM64 GKI kernel...");
+            DecompressKernelIfGzip(ranchu, kernelDest);
+            HcsRunner.GrantVmPermissions(kernelDest);
         }
 
-        // 6. Create instance metadata
+        // 6. Ensure userdata.vhdx exists for Hyper-V MicroVM
+        var userdataVhdx = Path.Combine(fullStoragePath, "userdata.vhdx");
+        if (!File.Exists(userdataVhdx))
+        {
+            statusCallback?.Invoke("Initializing dynamic userdata VHDX disk (8 GB)...");
+            HcsRunner.CreateDynamicVhdx(userdataVhdx, 8UL * 1024 * 1024 * 1024);
+        }
+
+        // 7. Create instance metadata
         var instance = new InstanceInfo
         {
             Id = id,
@@ -71,7 +82,7 @@ public class InstanceManager
             SystemId = sysImg.Id,
             StoragePath = fullStoragePath,
             CreatedAt = DateTime.UtcNow,
-            CpuCores = 4,
+            CpuCores = 6,
             MemoryMb = 4096,
             DisplayWidth = 1080,
             DisplayHeight = 2400,
@@ -84,7 +95,7 @@ public class InstanceManager
         var metaPath = Path.Combine(fullStoragePath, "instance.json");
         File.WriteAllText(metaPath, JsonSerializer.Serialize(instance, JsonOptions));
 
-        // 7. Update global config
+        // 8. Update global config
         config.Instances[id] = instance;
         if (string.IsNullOrEmpty(config.DefaultInstanceId))
         {
@@ -102,23 +113,34 @@ public class InstanceManager
 
         foreach (var entry in zip.Entries)
         {
-            if (string.IsNullOrEmpty(entry.Name)) continue; // Directory entry
+            if (string.IsNullOrEmpty(entry.Name)) continue;
 
-            // We only need root system files: system.img, vendor.img, kernel-ranchu, ramdisk.img, etc.
             var fileName = entry.Name;
             var destPath = Path.Combine(storagePath, fileName);
 
-            // Extract file directly
             statusCallback?.Invoke($"Extracting {fileName}...");
             entry.ExtractToFile(destPath, overwrite: true);
+            HcsRunner.GrantVmPermissions(destPath);
         }
     }
 
-    public static void CreateEmptyDisk(string filePath, long sizeBytes)
+    private static void DecompressKernelIfGzip(string sourceGzip, string destDecompressed)
     {
-        // Creates a sparse file on NTFS or standard sized file
-        using var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
-        fs.SetLength(sizeBytes);
+        using var inFs = File.OpenRead(sourceGzip);
+        var header = new byte[2];
+        inFs.ReadExactly(header, 0, 2);
+        inFs.Position = 0;
+
+        if (header[0] == 0x1f && header[1] == 0x8b)
+        {
+            using var gz = new GZipStream(inFs, CompressionMode.Decompress);
+            using var outFs = File.Create(destDecompressed);
+            gz.CopyTo(outFs);
+        }
+        else
+        {
+            File.Copy(sourceGzip, destDecompressed, overwrite: true);
+        }
     }
 
     public static bool Delete(string id, out string storagePath)
@@ -132,7 +154,6 @@ public class InstanceManager
 
         storagePath = instance.StoragePath;
 
-        // Clean up storage directory
         if (Directory.Exists(storagePath))
         {
             try
@@ -145,7 +166,6 @@ public class InstanceManager
             }
         }
 
-        // Remove from config
         config.Instances.Remove(id);
         if (config.DefaultInstanceId == id)
         {
