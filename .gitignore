@@ -11,6 +11,7 @@
 !/profiles/
 /profiles/*
 !/profiles/launcher3-settings-20260926.json
+!/profiles/network-audio-20260926.json
 !/tools/
 /tools/*
 !/tools/build_qemu_arm64.sh
