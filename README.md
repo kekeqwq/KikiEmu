@@ -86,7 +86,7 @@ ssh keke@192.168.2.185 'test -f ~/aosp-master/out/target/product/kikiaosp_test/s
 .\tools\collect_kikiaosp_assets.ps1
 ```
 
-收集脚本先核对两仓库 Git 修订，再用 SCP 拉回内核、system、vendor 与冻结辅助包；每项检查大小和 SHA-256，严格核对压缩包内容及解包后的六个辅助文件。成功后产生 `bundles/launcher3-settings-20260926/` 与 `bundle-profile.json`。若 SSH 地址或路径不同，可传 `-AospHost`、`-KernelHost`、`-AospRoot`、`-DeviceRepo`、`-KernelRepo`；若已手动取得同一辅助包，可用 `-LocalSupportArchive`。为防止混入旧镜像，脚本拒绝覆盖已有输出目录；再收集时使用新的 `-OutputDir`。失败会保留不完整目录供检查，不会伪称打包成功。
+收集脚本先核对两仓库 Git 修订，再用 SCP 拉回内核、system、vendor 与冻结辅助包；每项检查大小和 SHA-256，严格核对压缩包内容及解包后的六个辅助文件。默认使用主线稳定清单，成功后产生 `bundles/launcher3-settings-20260926/` 与 `bundle-profile.json`。测试新镜像时可传 `-ProfilePath` 指定另一份清单，输出目录默认取清单中的 `id`。若 SSH 地址或路径不同，可传 `-AospHost`、`-KernelHost`、`-AospRoot`、`-DeviceRepo`、`-KernelRepo`；若已手动取得同一辅助包，可用 `-LocalSupportArchive`。为防止混入旧镜像，脚本拒绝覆盖已有输出目录；再收集时使用新的 `-OutputDir`。失败会保留不完整目录供检查，不会伪称打包成功。
 
 ## 4. 启动与验证
 
@@ -132,11 +132,13 @@ adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c 
 该分支的内核启用 `CONFIG_SND_VIRTIO=y`。测试新内核及匹配的新 Android 镜像时，给本脚本传 `-SpeakerOutput`：QEMU 使用 `virtio-sound-pci` 的单路播放流和 Windows DirectSound。这个参数同时关闭旧的 Android 音频软件输出开关；不传时仍保留已验证基线的静音路径。Android 媒体流默认音量设为 15/15，实际听感由 Windows 上 QEMU 的音量调节。
 
 ```powershell
+.\tools\collect_kikiaosp_assets.ps1 -ProfilePath .\profiles\network-audio-20260926.json
 .\tools\run_kikiaosp_touch_local.ps1 `
+  -BundleDir .\bundles\network-audio-20260926 `
   -NativeResolution -SpeakerOutput `
-  -KernelImage C:\path\to\kernel-network-audio `
-  -SystemImage C:\path\to\system-network-audio.img `
-  -VendorImage C:\path\to\vendor-network-audio.img
+  -KernelImage kernel-linux-7.3-rc4-4k-sound `
+  -SystemImage system-kikiaosp-network-audio.img `
+  -VendorImage vendor-kikiaosp-network-audio.img
 
 adb connect 127.0.0.1:5555
 adb shell getprop sys.boot_completed
@@ -148,3 +150,5 @@ adb shell cmd media_session volume --stream 3 --get
 ```
 
 上述新镜像与功能需完成 Windows 客机实测，不能仅凭构建成功判定 APK 已联网或宿主扬声器已有声音。运行中的 QEMU 窗口归正在操作的人控制，测试结束前不要从构建脚本中关闭它。
+
+2026-09-26 的构建产物已经过收集脚本完整校验，位于 `bundles/network-audio-20260926/`。固定的内核/system/vendor SHA-256 依次是 `bbbf873b…fe406d`、`963305ad…ea57cf4`、`65411e95…0c5e1`；这三个哈希对应同一功能分支，不能与旧基线镜像混用。

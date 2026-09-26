@@ -5,13 +5,17 @@ param(
   [string]$AospRoot = '/home/keke/aosp-master',
   [string]$DeviceRepo = '/home/keke/projects/kikiaosp_test',
   [string]$KernelRepo = '/home/keke/projects/kikiaosp_kernel',
-  [string]$OutputDir = (Join-Path $PSScriptRoot '..\bundles\launcher3-settings-20260926'),
+  [string]$ProfilePath = (Join-Path $PSScriptRoot '..\profiles\launcher3-settings-20260926.json'),
+  [string]$OutputDir,
   [string]$LocalSupportArchive
 )
 
 $ErrorActionPreference = 'Stop'
-$profilePath = Join-Path $PSScriptRoot '..\profiles\launcher3-settings-20260926.json'
+$profilePath = (Resolve-Path -LiteralPath $ProfilePath).Path
 $profile = Get-Content -LiteralPath $profilePath -Raw | ConvertFrom-Json
+if ([string]::IsNullOrWhiteSpace($OutputDir)) {
+  $OutputDir = Join-Path $PSScriptRoot "..\bundles\$($profile.id)"
+}
 $outputFull = [IO.Path]::GetFullPath($OutputDir)
 
 function Assert-Hash([string]$path, $spec) {
