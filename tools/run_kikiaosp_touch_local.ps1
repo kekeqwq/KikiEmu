@@ -7,6 +7,7 @@ param(
   [string]$SystemImage = 'system-kikiaosp-network-audio-c2aidl.img',
   [string]$VendorImage = 'vendor-kikiaosp-network-audio-cap37.img',
   [ValidateSet('Software', 'Virgl')][string]$GpuMode = 'Software',
+  [ValidateSet('gtk', 'sdl')][string]$DisplayBackend = 'gtk',
   [switch]$GpuBlob,
   [ValidateRange(1, 16)][int]$VcpuCount = 4,
   [ValidateRange(0, 8)][int]$KernelLogLevel = 8,
@@ -19,6 +20,7 @@ param(
   [switch]$MouseTouchFallback,
   [switch]$InputTrace,
   [switch]$ResolutionTrace,
+  [switch]$TraceVirglFences,
   [switch]$DryRun
 )
 
@@ -30,6 +32,9 @@ if ($GpuMode -eq 'Virgl' -and -not $DryRun -and
 }
 if ($GpuBlob -and $GpuMode -ne 'Virgl') {
   throw '-GpuBlob requires -GpuMode Virgl'
+}
+if ($TraceVirglFences -and $GpuMode -ne 'Virgl') {
+  throw '-TraceVirglFences requires -GpuMode Virgl'
 }
 $shortDisplaySide = [Math]::Min($PortraitWidthPixels, $PortraitHeightPixels)
 $longDisplaySide = [Math]::Max($PortraitWidthPixels, $PortraitHeightPixels)
@@ -49,8 +54,12 @@ $kernel = if ([IO.Path]::IsPathRooted($KernelImage)) {
 if (-not (Test-Path -LiteralPath $kernel)) { throw "Missing kernel image $kernel" }
 $serial = Join-Path $images "qemu-kikiaosp-$Tag.log"
 $logcat = Join-Path $images "qemu-kikiaosp-$Tag.logcat"
+$qemuTrace = Join-Path $images "qemu-kikiaosp-$Tag.qemu-trace.log"
 foreach ($path in @($serial, $logcat)) {
   if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite $path" }
+}
+if ($TraceVirglFences -and (Test-Path -LiteralPath $qemuTrace)) {
+  throw "Refusing to overwrite $qemuTrace"
 }
 if (-not $DryRun -and (Get-NetTCPConnection -State Listen -LocalPort 4447,5555 -ErrorAction SilentlyContinue)) {
   throw 'QEMU test ports 4447 or 5555 are already in use'
@@ -97,7 +106,11 @@ $glOption = if ($GpuMode -eq 'Virgl') { 'on' } else { 'off' }
 $gpuDevice = if ($GpuMode -eq 'Virgl') { 'virtio-gpu-gl-pci' } else { 'virtio-gpu-pci' }
 $gpuBlobOption = if ($GpuBlob) { ',blob=on' } else { '' }
 $gpuDeviceOptions = "$gpuDevice,hostmem=256M,$gpuResolution$gpuBlobOption"
-$displayOptions = if ($NativeResolution) { "gtk,gl=$glOption,show-menubar=off" } else { "gtk,gl=$glOption" }
+$displayOptions = if ($DisplayBackend -eq 'gtk') {
+  if ($NativeResolution) { "gtk,gl=$glOption,show-menubar=off" } else { "gtk,gl=$glOption" }
+} else {
+  "sdl,gl=$glOption"
+}
 foreach ($item in @(
   '-device',$gpuDeviceOptions,
   '-device','virtio-multitouch-pci',
@@ -111,6 +124,16 @@ foreach ($item in @(
   '-serial',"file:$serial",'-snapshot'
 )) {
   $arguments.Add($item)
+}
+if ($TraceVirglFences) {
+  $traceEventsPath = (Join-Path $PSScriptRoot 'qemu-virgl-fence-events.txt').Replace('\','/')
+  $qemuTracePath = $qemuTrace.Replace('\','/')
+  $arguments.Add('-msg')
+  $arguments.Add('timestamp=on')
+  $arguments.Add('-trace')
+  $arguments.Add("events=$traceEventsPath")
+  $arguments.Add('-D')
+  $arguments.Add($qemuTracePath)
 }
 if ($SpeakerOutput) {
   $arguments.Add('-audiodev')
@@ -152,10 +175,12 @@ if ($ResolutionTrace) {
   $start.Environment['KIKI_GTK_RESOLUTION_TRACE'] = $resolutionTracePath
 }
 if ($NativeResolution) {
-  $start.Environment['KIKI_GTK_NATIVE_PIXELS'] = '1'
   $start.Environment['KIKI_VIRTIO_GPU_HOLD_LAST_SCANOUT'] = '1'
-  $start.Environment['KIKI_GTK_START_WIDTH'] = [string]$PortraitWidthPixels
-  $start.Environment['KIKI_GTK_START_HEIGHT'] = [string]$PortraitHeightPixels
+  if ($DisplayBackend -eq 'gtk') {
+    $start.Environment['KIKI_GTK_NATIVE_PIXELS'] = '1'
+    $start.Environment['KIKI_GTK_START_WIDTH'] = [string]$PortraitWidthPixels
+    $start.Environment['KIKI_GTK_START_HEIGHT'] = [string]$PortraitHeightPixels
+  }
 }
 foreach ($item in $arguments) { $start.ArgumentList.Add($item) }
 $process = [System.Diagnostics.Process]::Start($start)
@@ -171,4 +196,4 @@ $helperArguments = "-NoProfile -File `"$displayHelperPath`" -Serial 127.0.0.1:55
 $displayProcess = Start-Process -FilePath $pwshPath -ArgumentList $helperArguments `
   -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru
 $keyboardDevice = if ($VirtioKeyboard) { 'virtio-keyboard-pci' } else { 'none' }
-"QEMU_PID=$($process.Id) DISPLAY_HELPER_PID=$($displayProcess.Id) DISPLAY_LOG=$displayLog SERIAL=$serial LOGCAT=$logcat GPU_MODE=$GpuMode GPU_BLOB=$GpuBlob VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"
+"QEMU_PID=$($process.Id) DISPLAY_HELPER_PID=$($displayProcess.Id) DISPLAY_BACKEND=$DisplayBackend DISPLAY_LOG=$displayLog SERIAL=$serial LOGCAT=$logcat QEMU_TRACE=$($TraceVirglFences ? $qemuTrace : 'off') GPU_MODE=$GpuMode GPU_BLOB=$GpuBlob VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"

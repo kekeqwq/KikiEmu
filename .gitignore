@@ -23,6 +23,7 @@
 !/tools/configure_kikiaosp_display.ps1
 !/tools/collect_kikiaosp_assets.ps1
 !/tools/run_kikiaosp_touch_local.ps1
+!/tools/qemu-virgl-fence-events.txt
 !/tools/capture_qemu_window.ps1
 !/tools/probe_wgl_adreno.c
 !/tools/gpu-bench/

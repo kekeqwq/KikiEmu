@@ -1,0 +1,15 @@
+diff --git a/ui/sdl2.c b/ui/sdl2.c
+index 9d5e701..b53a9dd 100644
+--- a/ui/sdl2.c
++++ b/ui/sdl2.c
+@@ -126,3 +126,10 @@
+ #ifdef CONFIG_OPENGL
++#if defined(CONFIG_WIN32)
++        /* SDL desktop OpenGL uses WGL on Windows, not EGL. Calling
++         * eglGetCurrentDisplay() here can crash through an unset EGL
++         * dispatch table, so expose no EGL display to VirGL. */
++        qemu_egl_display = EGL_NO_DISPLAY;
++#else
+         qemu_egl_display = eglGetCurrentDisplay();
++#endif
+ #endif
