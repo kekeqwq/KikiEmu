@@ -21,6 +21,58 @@ index 270fbaa..b27baf0 100644
  
      if (idx >= g->conf.max_outputs) {
          return;
+diff --git a/hw/display/virtio-gpu.c b/hw/display/virtio-gpu.c
+index bb0f41b..79da72b 100644
+--- a/hw/display/virtio-gpu.c
++++ b/hw/display/virtio-gpu.c
+@@ -434,10 +434,46 @@ void virtio_gpu_release_scanout_dmabuf(VirtIOGPU *g, int scanout_id)
+ void virtio_gpu_disable_scanout(VirtIOGPU *g, int scanout_id)
+ {
+     struct virtio_gpu_scanout *scanout = &g->parent_obj.scanout[scanout_id];
++    bool hold_last_surface = false;
++    const char *resolution_trace = g_getenv("KIKI_GTK_RESOLUTION_TRACE");
++
++#ifdef G_OS_WIN32
++    /*
++     * Android briefly disables the primary plane while applying a new DRM
++     * mode.  Replacing the console surface with NULL makes that normal
++     * transition visible as a black flash.  KikiAOSP's native-resolution
++     * frontend keeps the last completed 2D frame until the guest installs
++     * its first framebuffer for the new mode.  The DisplaySurface retains a
++     * pixman reference, so the backing resource remains valid until the next
++     * qemu_console_set_surface() releases it.
++     */
++    /*
++     * A mode switch disables the scanout more than once. The first call
++     * still has the old surface; later calls see ds == NULL. Keep the
++     * console surface across all of those calls, or the follow-up disable
++     * clears the frame we just held.
++     */
++    hold_last_surface =
++        g_strcmp0(g_getenv("KIKI_VIRTIO_GPU_HOLD_LAST_SCANOUT"), "1") == 0 &&
++        scanout->dmabuf == NULL;
++#endif
++
++    if (resolution_trace) {
++        FILE *file = fopen(resolution_trace, "a");
++        if (file) {
++            fprintf(file, "time=%" G_GINT64_FORMAT
++                    " scanout-disable id=%d resource=%u hold=%d ds=%p dmabuf=%p\n",
++                    g_get_monotonic_time(), scanout_id, scanout->resource_id,
++                    hold_last_surface, scanout->ds, scanout->dmabuf);
++            fclose(file);
++        }
++    }
+ 
+     virtio_gpu_release_scanout_dmabuf(g, scanout_id);
+     qemu_console_gl_scanout_disable(scanout->con);
+-    qemu_console_set_surface(scanout->con, NULL);
++    if (!hold_last_surface) {
++        qemu_console_set_surface(scanout->con, NULL);
++    }
+     scanout->resource_id = 0;
+     scanout->ds = NULL;
+     scanout->width = 0;
 diff --git a/meson.build b/meson.build
 index cfac634..423652e 100644
 --- a/meson.build
@@ -40,7 +92,7 @@ index cfac634..423652e 100644
  endif
  
 diff --git a/ui/gtk.c b/ui/gtk.c
-index 46cbab2..586a8d3 100644
+index 46cbab2..7bc3068 100644
 --- a/ui/gtk.c
 +++ b/ui/gtk.c
 @@ -136,6 +136,14 @@ DECLARE_INSTANCE_CHECKER(VCChardev, VC_CHARDEV,
@@ -85,30 +137,67 @@ index 46cbab2..586a8d3 100644
          gtk_window_resize(GTK_WINDOW(vc->window ? vc->window : s->window),
                            VC_WINDOW_X_MIN, VC_WINDOW_Y_MIN);
      }
-@@ -966,6 +987,22 @@ static gboolean gd_draw_event(GtkWidget *widget, cairo_t *cr, void *opaque)
+@@ -922,6 +943,50 @@ void gd_update_scale(VirtualConsole *vc, int ww, int wh, int fbw, int fbh)
+  * presentation of the guest content.
+  */
+ 
++static void gd_kiki_apply_native_scale(GtkWidget *widget, VirtualConsole *vc,
++                                       int ww_widget, int wh_widget,
++                                       int fbw, int fbh)
++{
++#ifdef G_OS_WIN32
++    int scale_factor, window_px_w, window_px_h, dw, dh;
++    double sx, sy, fit;
++
++    if (g_strcmp0(g_getenv("KIKI_GTK_NATIVE_PIXELS"), "1") != 0 ||
++        fbw <= 0 || fbh <= 0 || ww_widget <= 0 || wh_widget <= 0) {
++        return;
++    }
++
++    scale_factor = MAX(gtk_widget_get_scale_factor(widget), 1);
++    window_px_w = ww_widget * scale_factor;
++    window_px_h = wh_widget * scale_factor;
++    dw = fbw > window_px_w ? fbw - window_px_w : window_px_w - fbw;
++    dh = fbh > window_px_h ? fbh - window_px_h : window_px_h - fbh;
++    if (dw <= 2 && dh <= 2) {
++        vc->gfx.scale_x = 1.0 / scale_factor;
++        vc->gfx.scale_y = 1.0 / scale_factor;
++        return;
++    }
++
++    /*
++     * The host window and guest scanout disagree while a mode change is in
++     * flight. Fit the complete frame instead of clipping its top-left corner.
++     * Drawing returns to one guest pixel per host pixel once the sizes match.
++     */
++    sx = (double)ww_widget / fbw;
++    sy = (double)wh_widget / fbh;
++    fit = sx < sy ? sx : sy;
++    vc->gfx.scale_x = fit;
++    vc->gfx.scale_y = fit;
++#else
++    (void)widget;
++    (void)vc;
++    (void)ww_widget;
++    (void)wh_widget;
++    (void)fbw;
++    (void)fbh;
++#endif
++}
++
+ static gboolean gd_draw_event(GtkWidget *widget, cairo_t *cr, void *opaque)
+ {
+     VirtualConsole *vc = opaque;
+@@ -966,6 +1031,8 @@ static gboolean gd_draw_event(GtkWidget *widget, cairo_t *cr, void *opaque)
  
      gd_update_scale(vc, ww_widget, wh_widget, fbw, fbh);
  
-+#ifdef G_OS_WIN32
-+    if (g_strcmp0(g_getenv("KIKI_GTK_NATIVE_PIXELS"), "1") == 0) {
-+        /*
-+         * Cairo draws in GTK logical coordinates.  On a HiDPI Windows
-+         * desktop one logical unit covers scale_factor physical pixels, so
-+         * an unscaled guest surface is clipped to its upper-left quadrant.
-+         * Use the inverse GTK scale to make one guest pixel occupy exactly
-+         * one host physical pixel.
-+         */
-+        const int scale_factor = MAX(gtk_widget_get_scale_factor(widget), 1);
-+
-+        vc->gfx.scale_x = 1.0 / scale_factor;
-+        vc->gfx.scale_y = 1.0 / scale_factor;
-+    }
-+#endif
++    gd_kiki_apply_native_scale(widget, vc, ww_widget, wh_widget, fbw, fbh);
 +
      ww_surface = fbw * vc->gfx.scale_x;
      wh_surface = fbh * vc->gfx.scale_y;
  
-@@ -997,32 +1034,22 @@ static gboolean gd_draw_event(GtkWidget *widget, cairo_t *cr, void *opaque)
+@@ -997,32 +1064,40 @@ static gboolean gd_draw_event(GtkWidget *widget, cairo_t *cr, void *opaque)
      return TRUE;
  }
  
@@ -126,14 +215,31 @@ index 46cbab2..586a8d3 100644
 +    int ww_surface, wh_surface;
      int ww_widget, wh_widget;
 +    int wx_offset = 0, wy_offset = 0;
++    int fbw = 0, fbh = 0;
++    GdkWindow *window;
  
 -    if (!vc->gfx.ds) {
 -        return TRUE;
--    }
 +    /* Event positions and Cairo output are both GTK logical coordinates.
 +     * Native-pixel mode expresses the DPI conversion in scale_x/scale_y. */
-+    ww_widget = gtk_widget_get_allocated_width(widget);
-+    wh_widget = gtk_widget_get_allocated_height(widget);
++    window = gtk_widget_get_window(widget);
++    if (window) {
++        ww_widget = gdk_window_get_width(window);
++        wh_widget = gdk_window_get_height(window);
++    } else {
++        ww_widget = gtk_widget_get_allocated_width(widget);
++        wh_widget = gtk_widget_get_allocated_height(widget);
++    }
++    if (vc->gfx.ds) {
++        fbw = surface_width(vc->gfx.ds);
++        fbh = surface_height(vc->gfx.ds);
++        gd_kiki_apply_native_scale(widget, vc, ww_widget, wh_widget, fbw, fbh);
++    }
++    if (!vc->gfx.ds || vc->gfx.scale_x == 0.0 || vc->gfx.scale_y == 0.0) {
++        *fb_x = x;
++        *fb_y = y;
++        return;
+     }
  
      ww_surface = surface_width(vc->gfx.ds) * vc->gfx.scale_x;
      wh_surface = surface_height(vc->gfx.ds) * vc->gfx.scale_y;
@@ -150,7 +256,7 @@ index 46cbab2..586a8d3 100644
      if (ww_widget > ww_surface) {
          wx_offset = (ww_widget - ww_surface) / 2;
      }
-@@ -1030,14 +1057,67 @@ static gboolean gd_motion_event(GtkWidget *widget, GdkEventMotion *motion,
+@@ -1030,14 +1105,67 @@ static gboolean gd_motion_event(GtkWidget *widget, GdkEventMotion *motion,
          wy_offset = (wh_widget - wh_surface) / 2;
      }
  
@@ -163,8 +269,7 @@ index 46cbab2..586a8d3 100644
 +    *fb_x = (x - wx_offset) / vc->gfx.scale_x;
 +    *fb_y = (y - wy_offset) / vc->gfx.scale_y;
 +}
- 
--    trace_gd_motion_event(ww_widget, wh_widget,
++
 +static void gd_kiki_trace_pointer(GtkWidget *widget, VirtualConsole *vc,
 +                                  const char *kind, double x, double y,
 +                                  double root_x, double root_y,
@@ -211,7 +316,8 @@ index 46cbab2..586a8d3 100644
 +    GtkDisplayState *s = vc->s;
 +    double fb_x, fb_y;
 +    int fbx, fby;
-+
+ 
+-    trace_gd_motion_event(ww_widget, wh_widget,
 +    if (!vc->gfx.ds || vc->gfx.scale_x <= 0 || vc->gfx.scale_y <= 0) {
 +        return TRUE;
 +    }
@@ -225,7 +331,7 @@ index 46cbab2..586a8d3 100644
                            gtk_widget_get_scale_factor(widget), fbx, fby);
  
      if (qemu_input_is_absolute(vc->gfx.dcl.con)) {
-@@ -1100,6 +1180,83 @@ static gboolean gd_button_event(GtkWidget *widget, GdkEventButton *button,
+@@ -1100,6 +1228,83 @@ static gboolean gd_button_event(GtkWidget *widget, GdkEventButton *button,
      GtkDisplayState *s = vc->s;
      InputButton btn;
  
@@ -309,7 +415,7 @@ index 46cbab2..586a8d3 100644
      /* implicitly grab the input at the first click in the relative mode */
      if (button->button == 1 && button->type == GDK_BUTTON_PRESS &&
          !qemu_input_is_absolute(vc->gfx.dcl.con) && s->ptr_owner != vc) {
-@@ -1201,13 +1358,42 @@ static gboolean gd_scroll_event(GtkWidget *widget, GdkEventScroll *scroll,
+@@ -1201,13 +1406,42 @@ static gboolean gd_scroll_event(GtkWidget *widget, GdkEventScroll *scroll,
  }
  
  
@@ -354,7 +460,7 @@ index 46cbab2..586a8d3 100644
  
      switch (touch->type) {
      case GDK_TOUCH_BEGIN:
-@@ -1225,12 +1411,80 @@ static gboolean gd_touch_event(GtkWidget *widget, GdkEventTouch *touch,
+@@ -1225,12 +1459,80 @@ static gboolean gd_touch_event(GtkWidget *widget, GdkEventTouch *touch,
          return FALSE;
      }
  
@@ -441,7 +547,7 @@ index 46cbab2..586a8d3 100644
      }
      return TRUE;
  }
-@@ -1976,12 +2230,36 @@ static gboolean gd_configure(GtkWidget *widget,
+@@ -1976,12 +2278,36 @@ static gboolean gd_configure(GtkWidget *widget,
      VirtualConsole *vc = opaque;
      const double sx = vc->gfx.scale_x, sy = vc->gfx.scale_y;
      double width = cfg->width, height = cfg->height;
@@ -480,7 +586,7 @@ index 46cbab2..586a8d3 100644
      gd_set_ui_size(vc, width, height);
  
      return FALSE;
-@@ -2649,12 +2927,14 @@ static void gd_create_menu_view(GtkDisplayState *s, DisplayOptions *opts)
+@@ -2649,12 +2975,14 @@ static void gd_create_menu_view(GtkDisplayState *s, DisplayOptions *opts)
              break;
          }
          add_gfx_console(s, con);
@@ -497,7 +603,7 @@ index 46cbab2..586a8d3 100644
          zoom_to_fit = s->opts->u.gtk.zoom_to_fit;
      }
      if (zoom_to_fit) {
-@@ -2670,6 +2950,8 @@ static void gd_create_menu_view(GtkDisplayState *s, DisplayOptions *opts)
+@@ -2670,6 +2998,8 @@ static void gd_create_menu_view(GtkDisplayState *s, DisplayOptions *opts)
      for (i = 0; i < INPUT_EVENT_SLOTS_MAX; i++) {
          struct touch_slot *slot = &touch_slots[i];
          slot->tracking_id = -1;
@@ -506,7 +612,7 @@ index 46cbab2..586a8d3 100644
      }
  
  #if defined(CONFIG_VTE)
-@@ -2858,6 +3140,23 @@ static void gtk_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -2858,6 +3188,23 @@ static void gtk_display_init(DisplayState *ds, DisplayOptions *opts)
  
      gtk_widget_show_all(s->window);
  

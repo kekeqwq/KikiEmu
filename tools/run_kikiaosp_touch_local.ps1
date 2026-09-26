@@ -113,6 +113,7 @@ if ($ResolutionTrace) {
 }
 if ($NativeResolution) {
   $start.Environment['KIKI_GTK_NATIVE_PIXELS'] = '1'
+  $start.Environment['KIKI_VIRTIO_GPU_HOLD_LAST_SCANOUT'] = '1'
   $start.Environment['KIKI_GTK_START_WIDTH'] = [string]$PortraitWidthPixels
   $start.Environment['KIKI_GTK_START_HEIGHT'] = [string]$PortraitHeightPixels
 }

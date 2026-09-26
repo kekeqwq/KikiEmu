@@ -121,6 +121,6 @@ adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c 
   -VendorImage C:\path\to\vendor-kikiaosp-resolution.img
 ```
 
-窗口停止拖动约一秒后，QEMU 将客户区的物理像素尺寸通过 VirtIO GPU UIInfo/EDID 交给客体；内核等待 EDID 与 display-info 同步完成，HWC 在同一 Android 显示对象上更新参数。QEMU GTK 绘制端使用 `1 / gtk_widget_get_scale_factor()`，因此在 Surface 的 200% DPI 下不会把完整客体帧裁成左上角。触摸事件仍以 GTK 逻辑坐标进入，再按同一绘制比例映射到新客体尺寸。
+窗口停止拖动约一秒后，QEMU 将客户区的物理像素尺寸通过 VirtIO GPU UIInfo/EDID 交给客体；内核等待 EDID 与 display-info 同步完成，HWC 在同一 Android 显示对象上更新参数。尺寸还没对齐时，GTK 把上一帧完整等比放进当前窗口，拖动过程中不会只剩左上角；对齐之后绘制回到一比一，Surface 200% 缩放下是一个客体像素对一个宿主物理像素。触摸坐标使用同一次绘制比例。模式切换时 virtio-gpu 会暂时保留上一帧，避免 Android 拆平面时闪成黑屏。
 
 本功能分支已验证 864×1728 → 2784×1876 → 864×1728，以及任意横向 2374×1530；这不等于高刷或宿主 GPU 加速已经完成。测试证据保存在本机 `~/Downloads/temp/`，其中整桌截图可能包含私人桌面背景，不提交或上传。
