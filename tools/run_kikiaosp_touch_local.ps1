@@ -7,9 +7,12 @@ param(
   [string]$SystemImage = 'system-kikiaosp-network-audio-c2aidl.img',
   [string]$VendorImage = 'vendor-kikiaosp-network-audio-cap37.img',
   [ValidateSet('Software', 'Virgl')][string]$GpuMode = 'Software',
+  [switch]$GpuBlob,
+  [ValidateRange(1, 16)][int]$VcpuCount = 4,
+  [ValidateRange(0, 8)][int]$KernelLogLevel = 8,
   [switch]$NativeResolution = $true,
-  [ValidateRange(400, 3840)][int]$PortraitWidthPixels = 864,
-  [ValidateRange(400, 3840)][int]$PortraitHeightPixels = 1728,
+  [ValidateRange(864, 3840)][int]$PortraitWidthPixels = 864,
+  [ValidateRange(864, 3840)][int]$PortraitHeightPixels = 1728,
   [switch]$AudioStubOutput = $true,
   [switch]$SpeakerOutput = $true,
   [switch]$VirtioKeyboard = $true,
@@ -24,6 +27,14 @@ $ErrorActionPreference = 'Stop'
 if ($GpuMode -eq 'Virgl' -and -not $DryRun -and
     $VendorImage -eq 'vendor-kikiaosp-network-audio-cap37.img') {
   throw 'VirGL requires a vendor image containing Mesa VirGL. Pass -VendorImage with the new verified image.'
+}
+if ($GpuBlob -and $GpuMode -ne 'Virgl') {
+  throw '-GpuBlob requires -GpuMode Virgl'
+}
+$shortDisplaySide = [Math]::Min($PortraitWidthPixels, $PortraitHeightPixels)
+$longDisplaySide = [Math]::Max($PortraitWidthPixels, $PortraitHeightPixels)
+if ($shortDisplaySide -lt 864 -or $longDisplaySide -lt 1728) {
+  throw "The minimum usable guest display is 864x1728 (either orientation); refusing $($PortraitWidthPixels)x$($PortraitHeightPixels)."
 }
 if ([string]::IsNullOrWhiteSpace($Tag)) {
   $Tag = "network-audio-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
@@ -41,12 +52,12 @@ $logcat = Join-Path $images "qemu-kikiaosp-$Tag.logcat"
 foreach ($path in @($serial, $logcat)) {
   if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite $path" }
 }
-if (Get-NetTCPConnection -State Listen -LocalPort 4447,5555 -ErrorAction SilentlyContinue) {
+if (-not $DryRun -and (Get-NetTCPConnection -State Listen -LocalPort 4447,5555 -ErrorAction SilentlyContinue)) {
   throw 'QEMU test ports 4447 or 5555 are already in use'
 }
 
 $eglDriver = if ($GpuMode -eq 'Virgl') { 'mesa' } else { 'angle' }
-$append = "earlycon=pl011,0x09000000 console=ttyAMA0 loglevel=8 printk.devkmsg=on audit=0 androidboot.hardware=ranchu androidboot.hardwareegl=$eglDriver androidboot.hardware.egl=$eglDriver androidboot.hardware.gralloc=minigbm androidboot.hardware.hwcomposer=ranchu androidboot.hardware.vulkan=pastel androidboot.hardware.hwcomposer.mode=client androidboot.hardware.hwcomposer.display_finder_mode=drm androidboot.hardware.guest_hwui_renderer=gles androidboot.debug.renderengine.backend=skiaglthreaded androidboot.selinux=permissive enforcing=0 androidboot.force_normal_boot=1 androidboot.verifiedbootstate=orange androidboot.init_fatal_reboot_target=none androidboot.adb.secure=0 binder.devices=binder,hwbinder,vndbinder"
+$append = "earlycon=pl011,0x09000000 console=ttyAMA0 loglevel=$KernelLogLevel printk.devkmsg=on audit=0 androidboot.hardware=ranchu androidboot.hardwareegl=$eglDriver androidboot.hardware.egl=$eglDriver androidboot.hardware.gralloc=minigbm androidboot.hardware.hwcomposer=ranchu androidboot.hardware.vulkan=pastel androidboot.hardware.hwcomposer.mode=client androidboot.hardware.hwcomposer.display_finder_mode=drm androidboot.hardware.guest_hwui_renderer=gles androidboot.debug.renderengine.backend=skiaglthreaded androidboot.selinux=permissive enforcing=0 androidboot.force_normal_boot=1 androidboot.verifiedbootstate=orange androidboot.init_fatal_reboot_target=none androidboot.adb.secure=0 binder.devices=binder,hwbinder,vndbinder"
 if ($SpeakerOutput) {
   $AudioStubOutput = $false
 }
@@ -54,7 +65,7 @@ if ($AudioStubOutput) {
   $append += ' androidboot.audio.tinyalsa.ignore_output=true'
 }
 $arguments = [System.Collections.Generic.List[string]]::new()
-foreach ($item in @('-M','virt','-accel','whpx','-cpu','host','-m','4096','-smp','4','-kernel',$kernel,'-initrd',(Join-Path $images 'kiki-kernel-ramdisk-rc4-clean-odm-adb.img'),'-append',$append)) {
+foreach ($item in @('-M','virt','-accel','whpx','-cpu','host','-m','4096','-smp',[string]$VcpuCount,'-kernel',$kernel,'-initrd',(Join-Path $images 'kiki-kernel-ramdisk-rc4-clean-odm-adb.img'),'-append',$append)) {
   $arguments.Add($item)
 }
 $partitions = @(
@@ -84,9 +95,11 @@ $logcatQemuPath = $logcat.Replace('\','/')
 $gpuResolution = if ($NativeResolution) { "xres=$PortraitWidthPixels,yres=$PortraitHeightPixels" } else { 'xres=1080,yres=2400' }
 $glOption = if ($GpuMode -eq 'Virgl') { 'on' } else { 'off' }
 $gpuDevice = if ($GpuMode -eq 'Virgl') { 'virtio-gpu-gl-pci' } else { 'virtio-gpu-pci' }
+$gpuBlobOption = if ($GpuBlob) { ',blob=on' } else { '' }
+$gpuDeviceOptions = "$gpuDevice,hostmem=256M,$gpuResolution$gpuBlobOption"
 $displayOptions = if ($NativeResolution) { "gtk,gl=$glOption,show-menubar=off" } else { "gtk,gl=$glOption" }
 foreach ($item in @(
-  '-device',"$gpuDevice,hostmem=256M,$gpuResolution",
+  '-device',$gpuDeviceOptions,
   '-device','virtio-multitouch-pci',
   '-netdev','user,id=net0,net=10.0.2.0/24,host=10.0.2.2,dns=10.0.2.3,hostfwd=tcp:127.0.0.1:5555-:5555',
   '-device','virtio-net-pci,netdev=net0',
@@ -111,7 +124,7 @@ if ($VirtioKeyboard) {
 }
 
 if ($DryRun) {
-  "QEMU_EXE=$qemu GPU_MODE=$GpuMode DRY_RUN=True"
+  "QEMU_EXE=$qemu GPU_MODE=$GpuMode GPU_BLOB=$GpuBlob VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel DRY_RUN=True"
   for ($i = 0; $i -lt $arguments.Count; $i++) {
     "QEMU_ARG[$i]=$($arguments[$i])"
   }
@@ -150,5 +163,12 @@ Start-Sleep -Seconds 2
 if ($process.HasExited) {
   throw "QEMU exited with code $($process.ExitCode); inspect the serial log at $serial"
 }
+$displayHelperPath = Join-Path $PSScriptRoot 'configure_kikiaosp_display.ps1'
+$displayLog = Join-Path $images "qemu-kikiaosp-$Tag.display.log"
+if (Test-Path -LiteralPath $displayLog) { throw "Refusing to overwrite $displayLog" }
+$pwshPath = (Get-Command pwsh -ErrorAction Stop).Source
+$helperArguments = "-NoProfile -File `"$displayHelperPath`" -Serial 127.0.0.1:5555 -LogPath `"$displayLog`""
+$displayProcess = Start-Process -FilePath $pwshPath -ArgumentList $helperArguments `
+  -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru
 $keyboardDevice = if ($VirtioKeyboard) { 'virtio-keyboard-pci' } else { 'none' }
-"QEMU_PID=$($process.Id) SERIAL=$serial LOGCAT=$logcat GPU_MODE=$GpuMode TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"
+"QEMU_PID=$($process.Id) DISPLAY_HELPER_PID=$($displayProcess.Id) DISPLAY_LOG=$displayLog SERIAL=$serial LOGCAT=$logcat GPU_MODE=$GpuMode GPU_BLOB=$GpuBlob VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"

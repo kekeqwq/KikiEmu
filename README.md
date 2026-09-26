@@ -97,7 +97,7 @@ adb shell getprop sys.boot_completed
 adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME
 ```
 
-脚本默认使用刚收集的 bundle、原生 ARM64 QEMU、WHPX、`virtio-gpu-pci`、`virtio-multitouch-pci` 和作为客机外设的 `virtio-keyboard-pci`。Windows QEMU 监控端口只监听 `127.0.0.1:4447`，ADB 转发端口为 `127.0.0.1:5555`。`-snapshot` 使测试不写回基础磁盘；串口和客机日志写入 bundle，每次自动加时间戳而不覆盖旧日志。可用 `-BundleDir`、`-QemuPath` 等参数测试新配对；不要把别的 vendor 与此 profile 混用。首次启动若停在锁屏，可按键或执行 `adb shell input keyevent 82` 解锁。
+脚本默认使用刚收集的 bundle、原生 ARM64 QEMU、WHPX、`virtio-gpu-pci`、`virtio-multitouch-pci` 和作为客机外设的 `virtio-keyboard-pci`。Windows QEMU 监控端口只监听 `127.0.0.1:4447`，ADB 转发端口为 `127.0.0.1:5555`。`-snapshot` 使测试不写回基础磁盘；串口、客机日志和显示初始化记录写入 bundle，每次自动加时间戳而不覆盖旧日志。启动器会在后台等 Android 启动完成，再配置满电虚拟电池与 AC 供电、关闭锁屏和屏保、保持唤醒并回到 Launcher 桌面；配置结果写入 `.display.log`。可用 `-BundleDir`、`-QemuPath` 等参数测试新配对；不要把别的 vendor 与此 profile 混用。
 
 实际画面证据要截整张 Windows 桌面且保持 QEMU 普通窗口，不要最大化：
 
@@ -107,9 +107,20 @@ adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c 
 
 截图写入 `~/Downloads/temp/`，不上传仓库。测试完请关闭 QEMU 窗口，避免占用桌面和端口。
 
-主线默认启动包含真实像素动态分辨率、Ethernet 和扬声器。点按音与铃声试听依赖当前 dma-buf 内核，以及 `media.c2.hal.selection=aidl` 的 system 镜像。高刷和宿主 GPU 硬件渲染仍未完成。关闭扬声器可传 `-SpeakerOutput:$false`，关闭动态分辨率可传 `-NativeResolution:$false`。
+主线默认启动包含真实像素动态分辨率、Ethernet 和扬声器。点按音与铃声试听依赖当前 dma-buf 内核，以及 `media.c2.hal.selection=aidl` 的 system 镜像。VirGL 已能经 Adreno 渲染，但帧率离日用目标仍有明显差距，高刷也未达标。关闭扬声器可传 `-SpeakerOutput:$false`，关闭动态分辨率可传 `-NativeResolution:$false`。
 
-GPU 加速实验记录见 [GPU_ACCELERATION.md](GPU_ACCELERATION.md)。功能分支增加了显式 `-GpuMode Virgl` 与 `-DryRun`；默认仍使用上述已验证的软件模式。只有配套 VirGL 镜像构建并通过验证后，才运行该实验模式。
+GPU 加速实验记录见 [GPU_ACCELERATION.md](GPU_ACCELERATION.md)。功能分支增加了显式 `-GpuMode Virgl`、`-GpuBlob` 与 `-DryRun`。Mesa VirGL 已经在 Adreno 上渲染出 Android Settings；当前原生 864×1728 受控滑动中位帧耗时约 69ms，仍在优化。`-GpuBlob` 用来验证 QEMU 共享 GPU 内存路径，必须搭配本功能分支的 Mesa 镜像，例如：
+
+```powershell
+.\tools\run_kikiaosp_touch_local.ps1 `
+  -BundleDir .\bundles\gpu-virgl-native-20260927 `
+  -SystemImage system-kikiaosp-gpu-virgl-native.img `
+  -VendorImage vendor-kikiaosp-gpu-virgl.img `
+  -GpuMode Virgl `
+  -GpuBlob
+```
+
+GPU 性能对比固定使用 864×1728 作为最小可用手机模式；启动器会拒绝更低的启动分辨率。基准程序按客机完整视口渲染，不做内部缩放，不通过降低分辨率制造虚高 FPS。
 
 ### 主线：真实像素动态分辨率
 

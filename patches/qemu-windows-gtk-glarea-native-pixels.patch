@@ -1,0 +1,20 @@
+diff --git a/ui/gtk.c b/ui/gtk.c
+--- a/ui/gtk.c
++++ b/ui/gtk.c
+@@ -824,9 +824,11 @@ static void gd_resize_event(GtkGLArea *area,
+         ph /= sy;
+     }
+
+-    /**
+-     * width and height here are in pixel coordinate, so we must divide it
+-     * by global window scale (gs)
+-     */
+-    gd_set_ui_size(vc, pw / gs, ph / gs);
++    /* GtkGLArea resize dimensions are already physical pixels.  Dividing
++     * them by the host DPI scale would halve the native guest mode again. */
++    if (g_strcmp0(g_getenv("KIKI_GTK_NATIVE_PIXELS"), "1") == 0) {
++        gd_set_ui_size(vc, pw, ph);
++    } else {
++        gd_set_ui_size(vc, pw / gs, ph / gs);
++    }
+ }

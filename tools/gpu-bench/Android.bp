@@ -1,0 +1,9 @@
+android_app {
+    name: "KikiGpuBench",
+    manifest: "AndroidManifest.xml",
+    srcs: ["src/**/*.java"],
+    sdk_version: "current",
+    min_sdk_version: "29",
+    target_sdk_version: "35",
+    certificate: "platform",
+}
