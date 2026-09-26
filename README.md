@@ -124,3 +124,27 @@ adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c 
 窗口停止拖动约一秒后，QEMU 将客户区的物理像素尺寸通过 VirtIO GPU UIInfo/EDID 交给客体；内核等待 EDID 与 display-info 同步完成，HWC 在同一 Android 显示对象上更新参数。尺寸还没对齐时，GTK 把上一帧完整等比放进当前窗口，拖动过程中不会只剩左上角；对齐之后绘制回到一比一，Surface 200% 缩放下是一个客体像素对一个宿主物理像素。触摸坐标使用同一次绘制比例。模式切换时 virtio-gpu 会暂时保留上一帧，避免 Android 拆平面时闪成黑屏。
 
 主线已验证 864×1728 → 2784×1876 → 864×1728，以及任意横向 2374×1530；这不等于高刷或宿主 GPU 加速已经完成。测试证据保存在本机 `~/Downloads/temp/`，其中整桌截图可能包含私人桌面背景，不提交或上传。
+
+### 功能分支：客机 Ethernet 与扬声器
+
+`feature/network-audio-20260926` 在 Android 设备树中为 QEMU 的 `virtio-net-pci` 注册 Ethernet 默认网络（静态地址 `10.0.2.15/24`、QEMU 网关 `10.0.2.2`、DNS `10.0.2.3`），并声明 `android.hardware.ethernet`。客机不会提供 Wi-Fi 或移动数据设备；QEMU user networking 经 Windows 当前可用路由出站。
+
+该分支的内核启用 `CONFIG_SND_VIRTIO=y`。测试新内核及匹配的新 Android 镜像时，给本脚本传 `-SpeakerOutput`：QEMU 使用 `virtio-sound-pci` 的单路播放流和 Windows DirectSound。这个参数同时关闭旧的 Android 音频软件输出开关；不传时仍保留已验证基线的静音路径。Android 媒体流默认音量设为 15/15，实际听感由 Windows 上 QEMU 的音量调节。
+
+```powershell
+.\tools\run_kikiaosp_touch_local.ps1 `
+  -NativeResolution -SpeakerOutput `
+  -KernelImage C:\path\to\kernel-network-audio `
+  -SystemImage C:\path\to\system-network-audio.img `
+  -VendorImage C:\path\to\vendor-network-audio.img
+
+adb connect 127.0.0.1:5555
+adb shell getprop sys.boot_completed
+adb shell pm has-feature android.hardware.ethernet
+adb shell dumpsys ethernet
+adb shell dumpsys connectivity
+adb shell cat /proc/asound/cards
+adb shell cmd media_session volume --stream 3 --get
+```
+
+上述新镜像与功能需完成 Windows 客机实测，不能仅凭构建成功判定 APK 已联网或宿主扬声器已有声音。运行中的 QEMU 窗口归正在操作的人控制，测试结束前不要从构建脚本中关闭它。

@@ -10,6 +10,7 @@ param(
   [ValidateRange(400, 3840)][int]$PortraitWidthPixels = 864,
   [ValidateRange(400, 3840)][int]$PortraitHeightPixels = 1728,
   [switch]$AudioStubOutput = $true,
+  [switch]$SpeakerOutput,
   [switch]$VirtioKeyboard = $true,
   [switch]$MouseTouchFallback,
   [switch]$InputTrace,
@@ -39,6 +40,9 @@ if (Get-NetTCPConnection -State Listen -LocalPort 4447,5555 -ErrorAction Silentl
 }
 
 $append = 'earlycon=pl011,0x09000000 console=ttyAMA0 loglevel=8 printk.devkmsg=on audit=0 androidboot.hardware=ranchu androidboot.hardwareegl=angle androidboot.hardware.egl=angle androidboot.hardware.gralloc=minigbm androidboot.hardware.hwcomposer=ranchu androidboot.hardware.vulkan=pastel androidboot.hardware.hwcomposer.mode=client androidboot.hardware.hwcomposer.display_finder_mode=drm androidboot.hardware.guest_hwui_renderer=gles androidboot.debug.renderengine.backend=skiaglthreaded androidboot.selinux=permissive enforcing=0 androidboot.force_normal_boot=1 androidboot.verifiedbootstate=orange androidboot.init_fatal_reboot_target=none androidboot.adb.secure=0 binder.devices=binder,hwbinder,vndbinder'
+if ($SpeakerOutput) {
+  $AudioStubOutput = $false
+}
 if ($AudioStubOutput) {
   $append += ' androidboot.audio.tinyalsa.ignore_output=true'
 }
@@ -75,7 +79,7 @@ $displayOptions = if ($NativeResolution) { 'gtk,gl=off,show-menubar=off' } else 
 foreach ($item in @(
   '-device',"virtio-gpu-pci,hostmem=256M,$gpuResolution",
   '-device','virtio-multitouch-pci',
-  '-netdev','user,id=net0,hostfwd=tcp:127.0.0.1:5555-:5555',
+  '-netdev','user,id=net0,net=10.0.2.0/24,host=10.0.2.2,dns=10.0.2.3,hostfwd=tcp:127.0.0.1:5555-:5555',
   '-device','virtio-net-pci,netdev=net0',
   '-device','virtio-serial-pci,id=kiki-serial',
   '-chardev',"file,id=kiki-logcat,path=$logcatQemuPath",
@@ -85,6 +89,12 @@ foreach ($item in @(
   '-serial',"file:$serial",'-snapshot'
 )) {
   $arguments.Add($item)
+}
+if ($SpeakerOutput) {
+  $arguments.Add('-audiodev')
+  $arguments.Add('dsound,id=kiki_audio')
+  $arguments.Add('-device')
+  $arguments.Add('virtio-sound-pci,audiodev=kiki_audio,streams=1')
 }
 if ($VirtioKeyboard) {
   $arguments.Add('-device')
@@ -124,4 +134,4 @@ if ($process.HasExited) {
   throw "QEMU exited with code $($process.ExitCode); inspect the serial log at $serial"
 }
 $keyboardDevice = if ($VirtioKeyboard) { 'virtio-keyboard-pci' } else { 'none' }
-"QEMU_PID=$($process.Id) SERIAL=$serial LOGCAT=$logcat TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"
+"QEMU_PID=$($process.Id) SERIAL=$serial LOGCAT=$logcat TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"
