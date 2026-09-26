@@ -11,6 +11,11 @@ static HDC probe_dc;
 static HGLRC probe_base_context;
 static int probe_cookie;
 
+static void *probe_get_egl_display(void *cookie) {
+    (void)cookie;
+    return NULL;
+}
+
 static void probe_write_fence(void *cookie, uint32_t fence) {
     (void)cookie;
     (void)fence;
@@ -97,16 +102,30 @@ int main(void) {
     probe_dc = dc;
     probe_base_context = context;
     struct virgl_renderer_callbacks callbacks = {0};
-    callbacks.version = 3;  // Same host-only callback ABI as this QEMU build.
+    callbacks.version = VIRGL_RENDERER_CALLBACKS_VERSION;
     callbacks.write_fence = probe_write_fence;
     callbacks.write_context_fence = probe_write_context_fence;
     callbacks.create_gl_context = probe_create_context;
     callbacks.destroy_gl_context = probe_destroy_context;
     callbacks.make_current = probe_make_current;
+#ifdef KIKI_PROBE_ASYNC_VIRGL
+    // Exercise virglrenderer async/thread-sync initialization on a WGL context
+    // with no EGL display before changing QEMU's production init path.
+    callbacks.get_egl_display = probe_get_egl_display;
+    int virgl_flags = VIRGL_RENDERER_ASYNC_FENCE_CB | VIRGL_RENDERER_THREAD_SYNC;
+#elif defined(KIKI_PROBE_THREAD_SYNC_VIRGL)
+    // Check whether WGL can activate thread sync; poll_fd == -1 means it was
+    // ignored, as virgl_renderer_get_poll_fd documents for this feature.
+    int virgl_flags = VIRGL_RENDERER_THREAD_SYNC;
+#else
+    int virgl_flags = 0;
+#endif
     // virglrenderer rejects a NULL cookie even when callbacks do not use it.
-    int virgl_result = virgl_renderer_init(&probe_cookie, 0, &callbacks);
+    int virgl_result = virgl_renderer_init(&probe_cookie, virgl_flags, &callbacks);
     printf("VIRGL_INIT=%d\n", virgl_result);
     if (virgl_result == 0) {
+        printf("VIRGL_FLAGS=0x%X POLL_FD=%d\n", virgl_flags,
+               virgl_renderer_get_poll_fd());
         uint32_t max_version = 0, max_size = 0;
         virgl_renderer_get_cap_set(1, &max_version, &max_size);
         printf("VIRGL_CAPSET_1_VERSION=%u SIZE=%u\n", max_version, max_size);
