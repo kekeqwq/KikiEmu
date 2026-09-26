@@ -1,7 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/KikiEmu.Cli/KikiEmu.Cli.csproj" />
-    <Project Path="src/KikiEmu.Core/KikiEmu.Core.csproj" />
-    <Project Path="src/KikiEmu.UI/KikiEmu.UI.csproj" />
-  </Folder>
-</Solution>

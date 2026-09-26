@@ -1,15 +1,18 @@
 param(
   [string]$Tag,
   [string]$KernelImage = 'kernel-linux-7.3-rc4-4k-netfilter-20260925',
-  [string]$SystemImage = 'system-kikiaosp-ui-keep-screen-on-20260926.img',
+  [string]$SystemImage = 'system-kikiaosp-launcher3-settings-stable-20260926.img',
   [string]$VendorImage = 'vendor-kikiaosp-ui-scanout-pixel-count-20260926.img',
   [switch]$AudioStubOutput = $true,
-  [switch]$TraceGpuScanout
+  [switch]$VirtioKeyboard = $true,
+  [switch]$MouseTouchFallback,
+  [switch]$InputTrace
 )
 
+# Verified Launcher3 + Settings baseline with guest multitouch and keyboard devices.
 $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($Tag)) {
-  $Tag = "stable-gui-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
+  $Tag = "launcher3-settings-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
 }
 $images = (Resolve-Path (Join-Path $PSScriptRoot '..\aosp\windows-arm64-test')).Path
 $qemu = (Resolve-Path (Join-Path $PSScriptRoot 'qemu-src\build\qemu-system-aarch64.exe')).Path
@@ -17,11 +20,9 @@ $kernel = Join-Path $images $KernelImage
 if (-not (Test-Path -LiteralPath $kernel)) { throw "Missing kernel image $kernel" }
 $serial = Join-Path $images "qemu-kikiaosp-$Tag.log"
 $logcat = Join-Path $images "qemu-kikiaosp-$Tag.logcat"
-$trace = Join-Path $images "qemu-kikiaosp-$Tag.qemu-trace"
 foreach ($path in @($serial, $logcat)) {
   if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite $path" }
 }
-if ($TraceGpuScanout -and (Test-Path -LiteralPath $trace)) { throw "Refusing to overwrite $trace" }
 if (Get-NetTCPConnection -State Listen -LocalPort 4447,5555 -ErrorAction SilentlyContinue) {
   throw 'QEMU test ports 4447 or 5555 are already in use'
 }
@@ -54,25 +55,41 @@ foreach ($partition in $partitions) {
   $arguments.Add("virtio-blk-pci,drive=$($partition[0])")
 }
 $logcatQemuPath = $logcat.Replace('\','/')
-foreach ($item in @('-device','virtio-gpu-pci,hostmem=256M,xres=1080,yres=2400','-netdev','user,id=net0,hostfwd=tcp:127.0.0.1:5555-:5555','-device','virtio-net-pci,netdev=net0','-device','virtio-serial-pci,id=kiki-serial','-chardev',"file,id=kiki-logcat,path=$logcatQemuPath",'-device','virtconsole,chardev=kiki-logcat,bus=kiki-serial.0,name=org.kikiaosp.logcat','-display','gtk,gl=off','-monitor','tcp:127.0.0.1:4447,server,nowait','-serial',"file:$serial",'-snapshot')) {
+foreach ($item in @(
+  '-device','virtio-gpu-pci,hostmem=256M,xres=1080,yres=2400',
+  '-device','virtio-multitouch-pci',
+  '-netdev','user,id=net0,hostfwd=tcp:127.0.0.1:5555-:5555',
+  '-device','virtio-net-pci,netdev=net0',
+  '-device','virtio-serial-pci,id=kiki-serial',
+  '-chardev',"file,id=kiki-logcat,path=$logcatQemuPath",
+  '-device','virtconsole,chardev=kiki-logcat,bus=kiki-serial.0,name=org.kikiaosp.logcat',
+  '-display','gtk,gl=off',
+  '-monitor','tcp:127.0.0.1:4447,server,nowait',
+  '-serial',"file:$serial",'-snapshot'
+)) {
   $arguments.Add($item)
 }
-if ($TraceGpuScanout) {
-  $events = (Join-Path $PSScriptRoot 'qemu-virtio-gpu-scanout.events').Replace('\','/')
-  $traceQemuPath = $trace.Replace('\','/')
-  $arguments.Add('-trace')
-  $arguments.Add("events=$events")
-  $arguments.Add('-trace')
-  $arguments.Add("file=$traceQemuPath")
+if ($VirtioKeyboard) {
+  $arguments.Add('-device')
+  $arguments.Add('virtio-keyboard-pci')
 }
 
 $start = [System.Diagnostics.ProcessStartInfo]::new($qemu)
 $start.UseShellExecute = $false
 $start.CreateNoWindow = $true
+if ($MouseTouchFallback) {
+  $start.Environment['KIKI_GTK_MOUSE_AS_TOUCH'] = '1'
+}
+if ($InputTrace) {
+  $inputTracePath = Join-Path $images "qemu-kikiaosp-$Tag.gtk-input.log"
+  if (Test-Path -LiteralPath $inputTracePath) { throw "Refusing to overwrite $inputTracePath" }
+  $start.Environment['KIKI_GTK_INPUT_TRACE'] = $inputTracePath
+}
 foreach ($item in $arguments) { $start.ArgumentList.Add($item) }
 $process = [System.Diagnostics.Process]::Start($start)
 Start-Sleep -Seconds 2
 if ($process.HasExited) {
   throw "QEMU exited with code $($process.ExitCode); inspect the serial log at $serial"
 }
-"QEMU_PID=$($process.Id) SERIAL=$serial LOGCAT=$logcat"
+$keyboardDevice = if ($VirtioKeyboard) { 'virtio-keyboard-pci' } else { 'none' }
+"QEMU_PID=$($process.Id) SERIAL=$serial LOGCAT=$logcat TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace"
