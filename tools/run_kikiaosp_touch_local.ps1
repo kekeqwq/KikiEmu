@@ -7,6 +7,7 @@ param(
   [string]$SystemImage = 'system-kikiaosp-network-audio-c2aidl.img',
   [string]$VendorImage = 'vendor-kikiaosp-network-audio-cap37.img',
   [ValidateSet('Software', 'Virgl')][string]$GpuMode = 'Software',
+  [ValidateSet('Client', 'Guest')][string]$HwcMode = 'Client',
   [ValidateSet('gtk', 'sdl')][string]$DisplayBackend = 'gtk',
   [switch]$GpuBlob,
   [ValidateRange(1, 16)][int]$VcpuCount = 4,
@@ -35,6 +36,9 @@ if ($GpuBlob -and $GpuMode -ne 'Virgl') {
 }
 if ($TraceVirglFences -and $GpuMode -ne 'Virgl') {
   throw '-TraceVirglFences requires -GpuMode Virgl'
+}
+if ($HwcMode -eq 'Guest' -and $GpuMode -ne 'Virgl') {
+  throw '-HwcMode Guest requires -GpuMode Virgl'
 }
 $shortDisplaySide = [Math]::Min($PortraitWidthPixels, $PortraitHeightPixels)
 $longDisplaySide = [Math]::Max($PortraitWidthPixels, $PortraitHeightPixels)
@@ -66,7 +70,7 @@ if (-not $DryRun -and (Get-NetTCPConnection -State Listen -LocalPort 4447,5555 -
 }
 
 $eglDriver = if ($GpuMode -eq 'Virgl') { 'mesa' } else { 'angle' }
-$append = "earlycon=pl011,0x09000000 console=ttyAMA0 loglevel=$KernelLogLevel printk.devkmsg=on audit=0 androidboot.hardware=ranchu androidboot.hardwareegl=$eglDriver androidboot.hardware.egl=$eglDriver androidboot.hardware.gralloc=minigbm androidboot.hardware.hwcomposer=ranchu androidboot.hardware.vulkan=pastel androidboot.hardware.hwcomposer.mode=client androidboot.hardware.hwcomposer.display_finder_mode=drm androidboot.hardware.guest_hwui_renderer=gles androidboot.debug.renderengine.backend=skiaglthreaded androidboot.selinux=permissive enforcing=0 androidboot.force_normal_boot=1 androidboot.verifiedbootstate=orange androidboot.init_fatal_reboot_target=none androidboot.adb.secure=0 binder.devices=binder,hwbinder,vndbinder"
+$append = "earlycon=pl011,0x09000000 console=ttyAMA0 loglevel=$KernelLogLevel printk.devkmsg=on audit=0 androidboot.hardware=ranchu androidboot.hardwareegl=$eglDriver androidboot.hardware.egl=$eglDriver androidboot.hardware.gralloc=minigbm androidboot.hardware.hwcomposer=ranchu androidboot.hardware.vulkan=pastel androidboot.hardware.hwcomposer.mode=$($HwcMode.ToLowerInvariant()) androidboot.hardware.hwcomposer.display_finder_mode=drm androidboot.hardware.guest_hwui_renderer=gles androidboot.debug.renderengine.backend=skiaglthreaded androidboot.selinux=permissive enforcing=0 androidboot.force_normal_boot=1 androidboot.verifiedbootstate=orange androidboot.init_fatal_reboot_target=none androidboot.adb.secure=0 binder.devices=binder,hwbinder,vndbinder"
 if ($SpeakerOutput) {
   $AudioStubOutput = $false
 }
@@ -147,7 +151,7 @@ if ($VirtioKeyboard) {
 }
 
 if ($DryRun) {
-  "QEMU_EXE=$qemu GPU_MODE=$GpuMode GPU_BLOB=$GpuBlob VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel DRY_RUN=True"
+  "QEMU_EXE=$qemu GPU_MODE=$GpuMode HWC_MODE=$HwcMode GPU_BLOB=$GpuBlob VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel DRY_RUN=True"
   for ($i = 0; $i -lt $arguments.Count; $i++) {
     "QEMU_ARG[$i]=$($arguments[$i])"
   }
@@ -196,4 +200,4 @@ $helperArguments = "-NoProfile -File `"$displayHelperPath`" -Serial 127.0.0.1:55
 $displayProcess = Start-Process -FilePath $pwshPath -ArgumentList $helperArguments `
   -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru
 $keyboardDevice = if ($VirtioKeyboard) { 'virtio-keyboard-pci' } else { 'none' }
-"QEMU_PID=$($process.Id) DISPLAY_HELPER_PID=$($displayProcess.Id) DISPLAY_BACKEND=$DisplayBackend DISPLAY_LOG=$displayLog SERIAL=$serial LOGCAT=$logcat QEMU_TRACE=$($TraceVirglFences ? $qemuTrace : 'off') GPU_MODE=$GpuMode GPU_BLOB=$GpuBlob VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"
+"QEMU_PID=$($process.Id) DISPLAY_HELPER_PID=$($displayProcess.Id) DISPLAY_BACKEND=$DisplayBackend DISPLAY_LOG=$displayLog SERIAL=$serial LOGCAT=$logcat QEMU_TRACE=$($TraceVirglFences ? $qemuTrace : 'off') GPU_MODE=$GpuMode HWC_MODE=$HwcMode GPU_BLOB=$GpuBlob VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"
