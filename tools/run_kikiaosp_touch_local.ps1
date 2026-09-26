@@ -1,26 +1,26 @@
 param(
   [string]$Tag,
-  [string]$BundleDir = (Join-Path $PSScriptRoot '..\bundles\launcher3-settings-20260926'),
+  [string]$BundleDir = (Join-Path $PSScriptRoot '..\bundles\network-audio-20260926'),
   [string]$QemuPath = (Join-Path $PSScriptRoot 'qemu-src\build\qemu-system-aarch64.exe'),
   [string]$Msys2Bin = 'C:\msys64\clangarm64\bin',
-  [string]$KernelImage = 'kernel-linux-7.3-rc4-4k-netfilter-20260925',
-  [string]$SystemImage = 'system-kikiaosp-launcher3-settings-stable-20260926.img',
-  [string]$VendorImage = 'vendor-kikiaosp-launcher3-settings-stable-20260926.img',
-  [switch]$NativeResolution,
+  [string]$KernelImage = 'kernel-linux-7.3-rc4-4k-dmabuf',
+  [string]$SystemImage = 'system-kikiaosp-network-audio-c2aidl.img',
+  [string]$VendorImage = 'vendor-kikiaosp-network-audio-cap37.img',
+  [switch]$NativeResolution = $true,
   [ValidateRange(400, 3840)][int]$PortraitWidthPixels = 864,
   [ValidateRange(400, 3840)][int]$PortraitHeightPixels = 1728,
   [switch]$AudioStubOutput = $true,
-  [switch]$SpeakerOutput,
+  [switch]$SpeakerOutput = $true,
   [switch]$VirtioKeyboard = $true,
   [switch]$MouseTouchFallback,
   [switch]$InputTrace,
   [switch]$ResolutionTrace
 )
 
-# Verified Launcher3 + Settings baseline with guest multitouch and keyboard devices.
+# Verified Ethernet, speaker, and Codec2 UI-sound baseline.
 $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($Tag)) {
-  $Tag = "launcher3-settings-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
+  $Tag = "network-audio-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
 }
 $images = (Resolve-Path -LiteralPath $BundleDir).Path
 $qemu = (Resolve-Path -LiteralPath $QemuPath).Path

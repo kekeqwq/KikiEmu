@@ -6,13 +6,13 @@
 | --- | --- | --- |
 | [kikiaosp_kernel](https://github.com/kekeqwq/kikiaosp_kernel) | Linux 7.3-rc4、4 KiB 内核配置和 Nix 构建 | `result/boot/kernel` |
 | [kikiaosp_test](https://github.com/kekeqwq/kikiaosp_test) | Android 17 `android17-release` 设备树、AOSP 补丁和系统构建 | `system.img`、`vendor.img`，以及本次冻结的运行辅助包 |
-| 本仓库 | QEMU Windows ARM 补丁/构建、SSH 收集、SHA-256 校验、运行包和启动 | `bundles/launcher3-settings-20260926/` 与本机 QEMU |
+| 本仓库 | QEMU Windows ARM 补丁/构建、SSH 收集、SHA-256 校验、运行包和启动 | `bundles/network-audio-20260926/` 与本机 QEMU |
 
 ## 当前已验证的配对
 
-`profiles/launcher3-settings-20260926.json` 是主分支稳定配对的文件名、字节数、SHA-256 和远端路径清单。它固定设备树源提交 `f26f688`、内核提交 `b43c32b`、QEMU 上游提交 `5f664cd`。185 开发机当前输出的 `system.img`（SHA-256 `002e6775…c830c85e`）和 `vendor.img`（`be0725a5…97b591be`）已经在 Windows ARM/WHPX 上一起启动过：`sys.boot_completed=1`，ADB、Launcher3、Settings 与真实多任务界面可用。QEMU 的 PE Machine 为 `0xAA64`，不是经 x86 转译的程序。
+`profiles/network-audio-20260926.json` 是当前主线配对。它固定设备树提交 `a371f1d`、内核提交 `ac04a34`、QEMU 上游提交 `5f664cd`。Windows ARM/WHPX 已验证 `sys.boot_completed=1`，ADB、Launcher3、Settings、Ethernet、扬声器 PCM、点按音和铃声试听可用。内核 SHA-256 为 `f33ef2371736dfd75122eaaf277223321117b57e572e235b5b35f558aa14db96`，system 为 `13c41b3d33b718075713d1472590a57b385f25610a2523bbe79d92a086df3636`，vendor 为 `67616fae719997d6a779e8d1c8a99c0de2ee8b7a72aa05c97c480bba56322eb2`。QEMU 的 PE Machine 为 `0xAA64`。此前的 Launcher3 + Settings 配对仍留在 `profiles/launcher3-settings-20260926.json`。
 
-真实像素动态分辨率已经收进主线，开发记录仍在 `feature/native-resolution-20260926`。Surface 的 Windows 桌面为 2880×1920、系统缩放为 200%；QEMU 默认手机窗口驱动客体为 864×1728，最大化后自动切换为 2784×1876，任意横向窗口实测为 2374×1530，恢复窗口又回到 864×1728。Windows 整桌截图逐项确认了 Android 的四边、状态栏、搜索框和三键导航完整可见，不再只显示左上角，也不是拉伸旧画布。三次模式切换中 SurfaceFlinger 和 Launcher3 PID 均未变化，触摸在分辨率稳定后可交互。配套内核 SHA-256 为 `e7ede20ab411b628f59f5345a7fa5da1155cd2a0a40dad45247f9498cacca06b`，实测 vendor SHA-256 为 `674652a3e965c36b20fd50eff2e3bd7c7a2ae1553cc8a76be3d1ed0925efb396`。
+真实像素动态分辨率已经收进主线，开发记录仍在 `feature/native-resolution-20260926`。Surface 的 Windows 桌面为 2880×1920、系统缩放为 200%；QEMU 默认手机窗口驱动客体为 864×1728，最大化后自动切换为 2784×1876，任意横向窗口实测为 2374×1530，恢复窗口又回到 864×1728。Windows 整桌截图逐项确认了 Android 的四边、状态栏、搜索框和三键导航完整可见，不再只显示左上角，也不是拉伸旧画布。三次模式切换中 SurfaceFlinger 和 Launcher3 PID 均未变化，触摸在分辨率稳定后可交互。该结论使用的内核 SHA-256 为 `e7ede20ab411b628f59f5345a7fa5da1155cd2a0a40dad45247f9498cacca06b`，vendor SHA-256 为 `674652a3e965c36b20fd50eff2e3bd7c7a2ae1553cc8a76be3d1ed0925efb396`。当前主线内核 `f33ef2371736dfd75122eaaf277223321117b57e572e235b5b35f558aa14db96` 保留该 EDID 补丁，并增加 virtio-sound 与 dma-buf system heap。
 
 运行时另需 `kikiaosp-runtime-support-20260926.tar.zst`，包含已经验证的启动 ramdisk、空 product/system_ext/odm、8 GiB F2FS userdata 与 misc。该压缩包只有约 21 MiB，当前保存在 185 的 `~/projects/kikiaosp_test/output/`，**不在 Git 中**；其中 ramdisk 并非当前 `m systemimage vendorimage` 的自动产物。收集脚本会验证压缩包及解出的每个文件，避免漏掉这项历史冻结依赖。换开发机时必须迁移同一压缩包；从新 AOSP 源码重新生成字节一致 ramdisk 的配方尚未完成。
 
@@ -86,7 +86,7 @@ ssh keke@192.168.2.185 'test -f ~/aosp-master/out/target/product/kikiaosp_test/s
 .\tools\collect_kikiaosp_assets.ps1
 ```
 
-收集脚本先核对两仓库 Git 修订，再用 SCP 拉回内核、system、vendor 与冻结辅助包；每项检查大小和 SHA-256，严格核对压缩包内容及解包后的六个辅助文件。默认使用主线稳定清单，成功后产生 `bundles/launcher3-settings-20260926/` 与 `bundle-profile.json`。测试新镜像时可传 `-ProfilePath` 指定另一份清单，输出目录默认取清单中的 `id`。若 SSH 地址或路径不同，可传 `-AospHost`、`-KernelHost`、`-AospRoot`、`-DeviceRepo`、`-KernelRepo`；若已手动取得同一辅助包，可用 `-LocalSupportArchive`。为防止混入旧镜像，脚本拒绝覆盖已有输出目录；再收集时使用新的 `-OutputDir`。失败会保留不完整目录供检查，不会伪称打包成功。
+收集脚本先核对两仓库 Git 修订，再用 SCP 拉回内核、system、vendor 与冻结辅助包；每项检查大小和 SHA-256，严格核对压缩包内容及解包后的六个辅助文件。默认使用主线清单 `profiles/network-audio-20260926.json`，成功后产生 `bundles/network-audio-20260926/` 与 `bundle-profile.json`。测试其他镜像时可传 `-ProfilePath`，输出目录默认取清单中的 `id`。若 SSH 地址或路径不同，可传 `-AospHost`、`-KernelHost`、`-AospRoot`、`-DeviceRepo`、`-KernelRepo`；若已手动取得同一辅助包，可用 `-LocalSupportArchive`。为防止混入旧镜像，脚本拒绝覆盖已有输出目录；再收集时使用新的 `-OutputDir`。失败会保留不完整目录供检查，不会伪称打包成功。
 
 ## 4. 启动与验证
 
@@ -107,7 +107,7 @@ adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c 
 
 截图写入 `~/Downloads/temp/`，不上传仓库。测试完请关闭 QEMU 窗口，避免占用桌面和端口。
 
-主线代码已经包含真实像素动态分辨率。冻结的 launcher3-settings 镜像如果不加 `-NativeResolution`、也不换配套内核和 vendor，最大化仍会拉伸旧画布。高刷、宿主 GPU 硬件渲染和真实扬声器播放仍未完成。
+主线默认启动包含真实像素动态分辨率、Ethernet 和扬声器。点按音与铃声试听依赖当前 dma-buf 内核，以及 `media.c2.hal.selection=aidl` 的 system 镜像。高刷和宿主 GPU 硬件渲染仍未完成。关闭扬声器可传 `-SpeakerOutput:$false`，关闭动态分辨率可传 `-NativeResolution:$false`。
 
 ### 主线：真实像素动态分辨率
 
@@ -125,30 +125,25 @@ adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c 
 
 主线已验证 864×1728 → 2784×1876 → 864×1728，以及任意横向 2374×1530；这不等于高刷或宿主 GPU 加速已经完成。测试证据保存在本机 `~/Downloads/temp/`，其中整桌截图可能包含私人桌面背景，不提交或上传。
 
-### 功能分支：客机 Ethernet 与扬声器
+### 主线：Ethernet、扬声器与界面音效
 
-`feature/network-audio-20260926` 在 Android 设备树中为 QEMU 的 `virtio-net-pci` 注册 Ethernet 默认网络（静态地址 `10.0.2.15/24`、QEMU 网关 `10.0.2.2`、DNS `10.0.2.3`），并声明 `android.hardware.ethernet`。客机不会提供 Wi-Fi 或移动数据设备；QEMU user networking 经 Windows 当前可用路由出站。
+Android 为 QEMU 的 `virtio-net-pci` 注册 Ethernet 默认网络，静态地址 `10.0.2.15/24`、网关 `10.0.2.2`、DNS `10.0.2.3`，并声明 `android.hardware.ethernet`。客机不提供 Wi-Fi 或移动数据；QEMU user networking 经 Windows 当前可用路由出站。
 
-该分支的内核启用 `CONFIG_SND_VIRTIO=y`。测试新内核及匹配的新 Android 镜像时，给本脚本传 `-SpeakerOutput`：QEMU 使用 `virtio-sound-pci` 的单路播放流和 Windows DirectSound。这个参数同时关闭旧的 Android 音频软件输出开关；不传时仍保留已验证基线的静音路径。Android 媒体流默认音量设为 15/15，实际听感由 Windows 上 QEMU 的音量调节。
+内核启用 `CONFIG_SND_VIRTIO=y`，以及 `CONFIG_DMABUF_HEAPS_SYSTEM=y`。启动脚本默认打开 `-SpeakerOutput` 和 `-NativeResolution`：QEMU 使用 `virtio-sound-pci` 的单路播放和 Windows DirectSound，同时关闭旧的 Android 音频软件输出开关。媒体流默认音量是 15/15，实际听感由 Windows 上 QEMU 的音量调节。`media.c2.hal.selection=aidl` 提供 Vorbis 解码；没有 `/dev/dma_heap/system` 时，PCM 能响，点按音和铃声试听会失败。
 
 ```powershell
-.\tools\collect_kikiaosp_assets.ps1 -ProfilePath .\profiles\network-audio-20260926.json
-.\tools\run_kikiaosp_touch_local.ps1 `
-  -BundleDir .\bundles\network-audio-20260926 `
-  -NativeResolution -SpeakerOutput `
-  -KernelImage kernel-linux-7.3-rc4-4k-sound `
-  -SystemImage system-kikiaosp-network-audio.img `
-  -VendorImage vendor-kikiaosp-network-audio.img
+.\tools\collect_kikiaosp_assets.ps1
+.\tools\run_kikiaosp_touch_local.ps1
 
 adb connect 127.0.0.1:5555
 adb shell getprop sys.boot_completed
 adb shell pm has-feature android.hardware.ethernet
 adb shell dumpsys ethernet
-adb shell dumpsys connectivity
 adb shell cat /proc/asound/cards
+adb shell getprop media.c2.hal.selection
 adb shell cmd media_session volume --stream 3 --get
 ```
 
-上述新镜像与功能需完成 Windows 客机实测，不能仅凭构建成功判定 APK 已联网或宿主扬声器已有声音。运行中的 QEMU 窗口归正在操作的人控制，测试结束前不要从构建脚本中关闭它。
+已在 Windows 客机确认 Ethernet、扬声器 PCM、设置里的点按音和铃声选择器试听。运行中的 QEMU 窗口归正在操作的人控制，测试结束前不要从脚本里关闭它。
 
-2026-09-26 的构建产物已经过收集脚本完整校验，位于 `bundles/network-audio-20260926/`。固定的内核/system/vendor SHA-256 依次是 `bbbf873b…fe406d`、`963305ad…ea57cf4`、`65411e95…0c5e1`；这三个哈希对应同一功能分支，不能与旧基线镜像混用。
+当前产物在 `bundles/network-audio-20260926/`。内核、system、vendor 的 SHA-256 依次是 `f33ef2371736dfd75122eaaf277223321117b57e572e235b5b35f558aa14db96`、`13c41b3d33b718075713d1472590a57b385f25610a2523bbe79d92a086df3636`、`67616fae719997d6a779e8d1c8a99c0de2ee8b7a72aa05c97c480bba56322eb2`。这三份文件对应同一主线，不能与旧基线镜像混用。

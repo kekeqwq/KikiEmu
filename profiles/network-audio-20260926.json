@@ -1,27 +1,27 @@
 {
   "id": "network-audio-20260926",
-  "description": "Android 17 Ethernet and speaker build; Windows runtime validation pending",
+  "description": "Android 17 Ethernet, speaker, and Codec2 UI sounds; verified on Windows ARM",
   "aospBranch": "android17-release",
-  "deviceRepositoryCommit": "6d794ac428a8a30aea2f163370de353c028711a0",
-  "kernelRepositoryCommit": "2d77c7a3098891776fcee2a557014dadc3fdf50d",
+  "deviceRepositoryCommit": "a371f1d6d32fd8013e541dc0b3ab99eb3841bbea",
+  "kernelRepositoryCommit": "ac04a340ad9efe14c7d7b7f288f1182e13cfbc04",
   "qemuUpstreamCommit": "5f664cd37aec17e8145aa117d8da68f507edc8f1",
   "kernel": {
-    "name": "kernel-linux-7.3-rc4-4k-sound",
-    "source": "result-network-audio/boot/kernel",
+    "name": "kernel-linux-7.3-rc4-4k-dmabuf",
+    "source": "result/boot/kernel",
     "bytes": 35613184,
-    "sha256": "bbbf873b85fef920faa49e566c0f356c83817e88e51fb210c05aa21fb3fe406d"
+    "sha256": "f33ef2371736dfd75122eaaf277223321117b57e572e235b5b35f558aa14db96"
   },
   "system": {
-    "name": "system-kikiaosp-network-audio.img",
+    "name": "system-kikiaosp-network-audio-c2aidl.img",
     "source": "out/target/product/kikiaosp_test/system.img",
-    "bytes": 1041625088,
-    "sha256": "963305ad2423ab2dc5bd27e7d4488ff4dbe1462a035190f45437289a0ea57cf4"
+    "bytes": 1051099136,
+    "sha256": "13c41b3d33b718075713d1472590a57b385f25610a2523bbe79d92a086df3636"
   },
   "vendor": {
-    "name": "vendor-kikiaosp-network-audio.img",
+    "name": "vendor-kikiaosp-network-audio-cap37.img",
     "source": "out/target/product/kikiaosp_test/vendor.img",
     "bytes": 94040064,
-    "sha256": "65411e95dedf1755aaff006354d8a88982fe23e4688e91553b53e6151780c5e1"
+    "sha256": "67616fae719997d6a779e8d1c8a99c0de2ee8b7a72aa05c97c480bba56322eb2"
   },
   "supportArchive": {
     "name": "kikiaosp-runtime-support-20260926.tar.zst",

@@ -5,7 +5,7 @@ param(
   [string]$AospRoot = '/home/keke/aosp-master',
   [string]$DeviceRepo = '/home/keke/projects/kikiaosp_test',
   [string]$KernelRepo = '/home/keke/projects/kikiaosp_kernel',
-  [string]$ProfilePath = (Join-Path $PSScriptRoot '..\profiles\launcher3-settings-20260926.json'),
+  [string]$ProfilePath = (Join-Path $PSScriptRoot '..\profiles\network-audio-20260926.json'),
   [string]$OutputDir,
   [string]$LocalSupportArchive
 )
