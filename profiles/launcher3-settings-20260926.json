@@ -1,0 +1,40 @@
+{
+  "id": "launcher3-settings-20260926",
+  "description": "Windows ARM / QEMU WHPX verified Launcher3 + Settings image set",
+  "aospBranch": "android17-release",
+  "deviceRepositoryCommit": "f26f68848eb00b82a699e2234c2a345317df2306",
+  "kernelRepositoryCommit": "b43c32b66e891105beb47f2c1c04998ac2d845f9",
+  "qemuUpstreamCommit": "5f664cd37aec17e8145aa117d8da68f507edc8f1",
+  "kernel": {
+    "name": "kernel-linux-7.3-rc4-4k-netfilter-20260925",
+    "source": "result/boot/kernel",
+    "bytes": 35613184,
+    "sha256": "289e12b89f54b143e253e3aaa4411ffc6f681ad5dfbdd2fd73f0e217629d0d45"
+  },
+  "system": {
+    "name": "system-kikiaosp-launcher3-settings-stable-20260926.img",
+    "source": "out/target/product/kikiaosp_test/system.img",
+    "bytes": 1041625088,
+    "sha256": "002e67758ff9cec0cc7c31161ba3cf12be3fad7a8fdfd0e6e4c559dcc830c85e"
+  },
+  "vendor": {
+    "name": "vendor-kikiaosp-launcher3-settings-stable-20260926.img",
+    "source": "out/target/product/kikiaosp_test/vendor.img",
+    "bytes": 94035968,
+    "sha256": "be0725a5d239c35280e3c067d22ed0edf59d2774ab966b31d96e16cb97b591be"
+  },
+  "supportArchive": {
+    "name": "kikiaosp-runtime-support-20260926.tar.zst",
+    "source": "output/kikiaosp-runtime-support-20260926.tar.zst",
+    "bytes": 21641351,
+    "sha256": "a8073fe77fc1e8a4e52f24af776955d6d9eae4ef5bd848d9dc703d8d4f1c363b"
+  },
+  "supportFiles": [
+    { "name": "kiki-kernel-ramdisk-rc4-clean-odm-adb.img", "bytes": 21372169, "sha256": "f36d932efd062b7dcc440fa9d4c2a18cb4414fcea05ad0c48eb89e15ad824131" },
+    { "name": "kiki-empty-product.img", "bytes": 4096, "sha256": "8319c323fefcdd4df5bf74efa8d342166e953c8c92d5d11b28173d766dcb49ee" },
+    { "name": "kiki-empty-system_ext.img", "bytes": 4096, "sha256": "a60e7eb41ac88facafa784799df0864049b0fb67c3264a76fc9fc0fce7a0a802" },
+    { "name": "userdata-kikiaosp17-f2fs.img", "bytes": 8589934592, "sha256": "ef599b4f275829df8e16fd29a2d8505470e70fe7efd4af18baefc7f9ca22281c" },
+    { "name": "misc.img", "bytes": 4194304, "sha256": "6374f685557c733c783cbb83853c68a3be18d0b16bb9658a17f685fcb7650413" },
+    { "name": "odm-kikiaosp17-empty.img", "bytes": 67108864, "sha256": "a35e49d5b5fb69b2aa3d2fd771a3b7779a620e5221754ef04e0d7e013d8bdb72" }
+  ]
+}

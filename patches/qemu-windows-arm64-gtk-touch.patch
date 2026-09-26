@@ -1,0 +1,375 @@
+diff --git a/meson.build b/meson.build
+index cfac634..423652e 100644
+--- a/meson.build
++++ b/meson.build
+@@ -3207,8 +3207,12 @@ if host_os == 'windows'
+     }
+   ''', name: 'mingw setjmp and longjmp')
+ 
++  # MSYS2 ARM64 currently provides the native setjmp/longjmp ABI but does
++  # not export the x86-oriented __mingw_setjmp/__mingw_longjmp aliases.
++  # Do not reject the native Windows ARM64 build on that configure-only
++  # probe; the QEMU TCG code uses the CRT setjmp implementation directly.
+   if cpu == 'aarch64' and not mingw_has_setjmp_longjmp
+-    error('mingw must provide setjmp/longjmp for windows-arm64')
++    warning('mingw setjmp/longjmp aliases unavailable; continuing with native CRT ABI')
+   endif
+ endif
+ 
+diff --git a/ui/gtk.c b/ui/gtk.c
+index 46cbab2..08e0082 100644
+--- a/ui/gtk.c
++++ b/ui/gtk.c
+@@ -136,6 +136,14 @@ DECLARE_INSTANCE_CHECKER(VCChardev, VC_CHARDEV,
+ 
+ static struct touch_slot touch_slots[INPUT_EVENT_SLOTS_MAX];
+ 
++typedef struct {
++    GdkEventSequence *sequence;
++    bool active;
++} GtkTouchSequenceSlot;
++
++static GtkTouchSequenceSlot gtk_touch_sequences[INPUT_EVENT_SLOTS_MAX];
++static bool gtk_mouse_touch_down;
++
+ bool gtk_use_gl_area;
+ 
+ static void gd_grab_pointer(VirtualConsole *vc, const char *reason);
+@@ -997,32 +1005,19 @@ static gboolean gd_draw_event(GtkWidget *widget, cairo_t *cr, void *opaque)
+     return TRUE;
+ }
+ 
+-static gboolean gd_motion_event(GtkWidget *widget, GdkEventMotion *motion,
+-                                void *opaque)
++static void gd_widget_to_framebuffer(GtkWidget *widget, VirtualConsole *vc,
++                                    double x, double y,
++                                    double *fb_x, double *fb_y)
+ {
+-    VirtualConsole *vc = opaque;
+-    GtkDisplayState *s = vc->s;
+-    int fbx, fby;
+-    int wx_offset, wy_offset;
+-    int wh_surface, ww_surface;
++    int ww_surface, wh_surface;
+     int ww_widget, wh_widget;
+-
+-    if (!vc->gfx.ds) {
+-        return TRUE;
+-    }
++    int wx_offset = 0, wy_offset = 0;
+ 
+     ww_surface = surface_width(vc->gfx.ds) * vc->gfx.scale_x;
+     wh_surface = surface_height(vc->gfx.ds) * vc->gfx.scale_y;
+     ww_widget = gtk_widget_get_allocated_width(widget);
+     wh_widget = gtk_widget_get_allocated_height(widget);
+ 
+-    /*
+-     * `widget` may not have the same size with the frame buffer.
+-     * In such cases, some paddings are needed around the `vc`.
+-     * To achieve that, `vc` will be displayed at (mx, my)
+-     * so that it is displayed at the center of the widget.
+-     */
+-    wx_offset = wy_offset = 0;
+     if (ww_widget > ww_surface) {
+         wx_offset = (ww_widget - ww_surface) / 2;
+     }
+@@ -1030,14 +1025,67 @@ static gboolean gd_motion_event(GtkWidget *widget, GdkEventMotion *motion,
+         wy_offset = (wh_widget - wh_surface) / 2;
+     }
+ 
+-    /*
+-     * `motion` is reported in `widget` coordinates
+-     * so translating it to the coordinates in `vc`.
+-     */
+-    fbx = (motion->x - wx_offset) / vc->gfx.scale_x;
+-    fby = (motion->y - wy_offset) / vc->gfx.scale_y;
++    *fb_x = (x - wx_offset) / vc->gfx.scale_x;
++    *fb_y = (y - wy_offset) / vc->gfx.scale_y;
++}
+ 
+-    trace_gd_motion_event(ww_widget, wh_widget,
++static void gd_kiki_trace_pointer(GtkWidget *widget, VirtualConsole *vc,
++                                  const char *kind, double x, double y,
++                                  double root_x, double root_y,
++                                  double fb_x, double fb_y,
++                                  gboolean pointer_emulated)
++{
++    const char *path = g_getenv("KIKI_GTK_INPUT_TRACE");
++    GdkWindow *window;
++    FILE *file;
++    int origin_x = 0, origin_y = 0;
++
++    if (!path || !vc->gfx.ds) {
++        return;
++    }
++    window = gtk_widget_get_window(widget);
++    if (window) {
++        gdk_window_get_origin(window, &origin_x, &origin_y);
++    }
++    file = fopen(path, "a");
++    if (!file) {
++        return;
++    }
++    fprintf(file,
++            "time=%" G_GINT64_FORMAT " kind=%s xy=%.2f,%.2f "
++            "root=%.2f,%.2f origin=%d,%d mapped=%.2f,%.2f "
++            "widget=%d,%d window=%d,%d factor=%d surface=%d,%d "
++            "scale=%.5f,%.5f pointer_emulated=%d\n",
++            g_get_monotonic_time(), kind, x, y, root_x, root_y,
++            origin_x, origin_y, fb_x, fb_y,
++            gtk_widget_get_allocated_width(widget),
++            gtk_widget_get_allocated_height(widget),
++            window ? gdk_window_get_width(window) : -1,
++            window ? gdk_window_get_height(window) : -1,
++            window ? gdk_window_get_scale_factor(window) : -1,
++            surface_width(vc->gfx.ds), surface_height(vc->gfx.ds),
++            vc->gfx.scale_x, vc->gfx.scale_y, pointer_emulated);
++    fclose(file);
++}
++
++static gboolean gd_motion_event(GtkWidget *widget, GdkEventMotion *motion,
++                                void *opaque)
++{
++    VirtualConsole *vc = opaque;
++    GtkDisplayState *s = vc->s;
++    double fb_x, fb_y;
++    int fbx, fby;
++
++    if (!vc->gfx.ds || vc->gfx.scale_x <= 0 || vc->gfx.scale_y <= 0) {
++        return TRUE;
++    }
++
++    gd_widget_to_framebuffer(widget, vc, motion->x, motion->y, &fb_x, &fb_y);
++    fbx = fb_x;
++    fby = fb_y;
++
++    trace_gd_motion_event(gtk_widget_get_allocated_width(widget),
++                          gtk_widget_get_allocated_height(widget),
+                           gtk_widget_get_scale_factor(widget), fbx, fby);
+ 
+     if (qemu_input_is_absolute(vc->gfx.dcl.con)) {
+@@ -1100,6 +1148,83 @@ static gboolean gd_button_event(GtkWidget *widget, GdkEventButton *button,
+     GtkDisplayState *s = vc->s;
+     InputButton btn;
+ 
++    if (button->button == 1 && vc->gfx.ds &&
++        vc->gfx.scale_x > 0 && vc->gfx.scale_y > 0) {
++        double fb_x, fb_y;
++        gd_widget_to_framebuffer(widget, vc, button->x, button->y,
++                                 &fb_x, &fb_y);
++        gd_kiki_trace_pointer(widget, vc,
++                              button->type == GDK_BUTTON_PRESS ?
++                              "mouse-down" : "mouse-up",
++                              button->x, button->y,
++                              button->x_root, button->y_root, fb_x, fb_y,
++                              gdk_event_get_pointer_emulated((GdkEvent *)button));
++    }
++
++    /* GTK/Win32 can report a Surface finger as a mouse click instead of a
++     * GDK_TOUCH event. Opt in only for KikiAOSP's touch-only experiment; the
++     * normal QEMU mouse path remains unchanged for other users. */
++    if (button->button == 1 &&
++        g_strcmp0(g_getenv("KIKI_GTK_MOUSE_AS_TOUCH"), "1") == 0) {
++        const int slot = INPUT_EVENT_SLOTS_MAX - 1;
++        double fb_x, fb_y;
++        Error *err = NULL;
++        int i;
++        bool active = false;
++
++        if (button->type == GDK_2BUTTON_PRESS ||
++            button->type == GDK_3BUTTON_PRESS || !vc->gfx.ds ||
++            vc->gfx.scale_x <= 0 || vc->gfx.scale_y <= 0) {
++            return TRUE;
++        }
++
++        if (button->type == GDK_BUTTON_PRESS) {
++            if (gtk_mouse_touch_down || touch_slots[slot].tracking_id != -1) {
++                return TRUE;
++            }
++            for (i = 0; i < INPUT_EVENT_SLOTS_MAX; i++) {
++                if (gtk_touch_sequences[i].active) {
++                    return TRUE; /* Native GDK_TOUCH already owns this finger. */
++                }
++            }
++            gd_widget_to_framebuffer(widget, vc, button->x, button->y,
++                                     &fb_x, &fb_y);
++            if (fb_x < 0 || fb_y < 0 ||
++                fb_x >= surface_width(vc->gfx.ds) ||
++                fb_y >= surface_height(vc->gfx.ds)) {
++                return TRUE;
++            }
++            qemu_input_touch_event(vc->gfx.dcl.con, touch_slots, slot,
++                                   surface_width(vc->gfx.ds),
++                                   surface_height(vc->gfx.ds), fb_x, fb_y,
++                                   INPUT_MULTI_TOUCH_TYPE_BEGIN, &err);
++            gtk_mouse_touch_down = !err;
++        } else if (button->type == GDK_BUTTON_RELEASE &&
++                   gtk_mouse_touch_down) {
++            qemu_input_touch_event(vc->gfx.dcl.con, touch_slots, slot,
++                                   surface_width(vc->gfx.ds),
++                                   surface_height(vc->gfx.ds),
++                                   touch_slots[slot].x, touch_slots[slot].y,
++                                   INPUT_MULTI_TOUCH_TYPE_END, &err);
++            gtk_mouse_touch_down = false;
++            for (i = 0; i < INPUT_EVENT_SLOTS_MAX; i++) {
++                if (touch_slots[i].tracking_id != -1) {
++                    active = true;
++                    break;
++                }
++            }
++            if (!active) {
++                qemu_input_queue_btn(vc->gfx.dcl.con,
++                                     INPUT_BUTTON_TOUCH, false);
++                qemu_input_event_sync();
++            }
++        }
++        if (err) {
++            warn_report_err(err);
++        }
++        return TRUE;
++    }
++
+     /* implicitly grab the input at the first click in the relative mode */
+     if (button->button == 1 && button->type == GDK_BUTTON_PRESS &&
+         !qemu_input_is_absolute(vc->gfx.dcl.con) && s->ptr_owner != vc) {
+@@ -1201,13 +1326,42 @@ static gboolean gd_scroll_event(GtkWidget *widget, GdkEventScroll *scroll,
+ }
+ 
+ 
++static int gd_touch_sequence_find(GdkEventSequence *sequence)
++{
++    int i;
++
++    for (i = 0; i < INPUT_EVENT_SLOTS_MAX; i++) {
++        if (gtk_touch_sequences[i].active &&
++            gtk_touch_sequences[i].sequence == sequence) {
++            return i;
++        }
++    }
++    return -1;
++}
++
++static int gd_touch_sequence_alloc(GdkEventSequence *sequence)
++{
++    int i;
++
++    for (i = 0; i < INPUT_EVENT_SLOTS_MAX; i++) {
++        if (!gtk_touch_sequences[i].active) {
++            gtk_touch_sequences[i].sequence = sequence;
++            gtk_touch_sequences[i].active = true;
++            return i;
++        }
++    }
++    return -1;
++}
++
+ static gboolean gd_touch_event(GtkWidget *widget, GdkEventTouch *touch,
+                                void *opaque)
+ {
+     VirtualConsole *vc = opaque;
+     Error *err = NULL;
+-    uint64_t num_slot = GPOINTER_TO_UINT(touch->sequence);
+-    int type = -1;
++    double fb_x = 0, fb_y = 0;
++    int num_slot, type;
++    int i;
++    bool active = false;
+ 
+     switch (touch->type) {
+     case GDK_TOUCH_BEGIN:
+@@ -1225,12 +1379,80 @@ static gboolean gd_touch_event(GtkWidget *widget, GdkEventTouch *touch,
+         return FALSE;
+     }
+ 
+-    qemu_input_touch_event(vc->gfx.dcl.con, touch_slots,
+-                           num_slot, surface_width(vc->gfx.ds),
+-                           surface_height(vc->gfx.ds), touch->x,
+-                           touch->y, type, &err);
+-    if (err) {
+-        warn_report_err(err);
++    if (!vc->gfx.ds || vc->gfx.scale_x <= 0 || vc->gfx.scale_y <= 0) {
++        return TRUE;
++    }
++
++    num_slot = gd_touch_sequence_find(touch->sequence);
++    if (type == INPUT_MULTI_TOUCH_TYPE_BEGIN) {
++        gd_widget_to_framebuffer(widget, vc, touch->x, touch->y,
++                                 &fb_x, &fb_y);
++        if (num_slot < 0) {
++            num_slot = gd_touch_sequence_alloc(touch->sequence);
++            if (num_slot < 0) {
++                warn_report("gtk: no free multitouch slot for new sequence");
++                return TRUE;
++            }
++        }
++    } else if (num_slot < 0) {
++        /* Ignore updates and releases without a matching begin. */
++        return TRUE;
++    }
++
++    if (type == INPUT_MULTI_TOUCH_TYPE_BEGIN ||
++        type == INPUT_MULTI_TOUCH_TYPE_UPDATE) {
++        gd_widget_to_framebuffer(widget, vc, touch->x, touch->y,
++                                 &fb_x, &fb_y);
++        if (fb_x < 0 || fb_y < 0 ||
++            fb_x >= surface_width(vc->gfx.ds) ||
++            fb_y >= surface_height(vc->gfx.ds)) {
++            /* Keep tracking the host sequence; it may enter the image later. */
++            return TRUE;
++        }
++        if (type == INPUT_MULTI_TOUCH_TYPE_UPDATE &&
++            touch_slots[num_slot].tracking_id == -1) {
++            /* Promote an ignored letterbox begin when it enters the image. */
++            type = INPUT_MULTI_TOUCH_TYPE_BEGIN;
++        }
++    } else if (type == INPUT_MULTI_TOUCH_TYPE_END) {
++        /* qemu_input_touch_event() stores coordinates before processing END. */
++        fb_x = touch_slots[num_slot].x;
++        fb_y = touch_slots[num_slot].y;
++    }
++
++    if (type != INPUT_MULTI_TOUCH_TYPE_END ||
++        touch_slots[num_slot].tracking_id != -1) {
++        gd_kiki_trace_pointer(widget, vc,
++                              type == INPUT_MULTI_TOUCH_TYPE_BEGIN ?
++                              "touch-down" :
++                              type == INPUT_MULTI_TOUCH_TYPE_UPDATE ?
++                              "touch-move" : "touch-up",
++                              touch->x, touch->y,
++                              touch->x_root, touch->y_root, fb_x, fb_y,
++                              gdk_event_get_pointer_emulated((GdkEvent *)touch));
++        qemu_input_touch_event(vc->gfx.dcl.con, touch_slots,
++                               num_slot, surface_width(vc->gfx.ds),
++                               surface_height(vc->gfx.ds), fb_x, fb_y, type, &err);
++        if (err) {
++            warn_report_err(err);
++        }
++    }
++
++    if (type == INPUT_MULTI_TOUCH_TYPE_END) {
++        gtk_touch_sequences[num_slot].active = false;
++        gtk_touch_sequences[num_slot].sequence = NULL;
++        for (i = 0; i < INPUT_EVENT_SLOTS_MAX; i++) {
++            if (touch_slots[i].tracking_id != -1) {
++                active = true;
++                break;
++            }
++        }
++        if (!active) {
++            /* qemu_input_touch_event() sends BTN_TOUCH down on contact but
++             * leaves the matching final up event to the frontend. */
++            qemu_input_queue_btn(vc->gfx.dcl.con, INPUT_BUTTON_TOUCH, false);
++            qemu_input_event_sync();
++        }
+     }
+     return TRUE;
+ }
+@@ -2670,6 +2892,8 @@ static void gd_create_menu_view(GtkDisplayState *s, DisplayOptions *opts)
+     for (i = 0; i < INPUT_EVENT_SLOTS_MAX; i++) {
+         struct touch_slot *slot = &touch_slots[i];
+         slot->tracking_id = -1;
++        gtk_touch_sequences[i].sequence = NULL;
++        gtk_touch_sequences[i].active = false;
+     }
+ 
+ #if defined(CONFIG_VTE)

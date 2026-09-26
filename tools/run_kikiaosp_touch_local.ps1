@@ -1,8 +1,11 @@
 param(
   [string]$Tag,
+  [string]$BundleDir = (Join-Path $PSScriptRoot '..\bundles\launcher3-settings-20260926'),
+  [string]$QemuPath = (Join-Path $PSScriptRoot 'qemu-src\build\qemu-system-aarch64.exe'),
+  [string]$Msys2Bin = 'C:\msys64\clangarm64\bin',
   [string]$KernelImage = 'kernel-linux-7.3-rc4-4k-netfilter-20260925',
   [string]$SystemImage = 'system-kikiaosp-launcher3-settings-stable-20260926.img',
-  [string]$VendorImage = 'vendor-kikiaosp-ui-scanout-pixel-count-20260926.img',
+  [string]$VendorImage = 'vendor-kikiaosp-launcher3-settings-stable-20260926.img',
   [switch]$AudioStubOutput = $true,
   [switch]$VirtioKeyboard = $true,
   [switch]$MouseTouchFallback,
@@ -14,8 +17,8 @@ $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($Tag)) {
   $Tag = "launcher3-settings-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
 }
-$images = (Resolve-Path (Join-Path $PSScriptRoot '..\aosp\windows-arm64-test')).Path
-$qemu = (Resolve-Path (Join-Path $PSScriptRoot 'qemu-src\build\qemu-system-aarch64.exe')).Path
+$images = (Resolve-Path -LiteralPath $BundleDir).Path
+$qemu = (Resolve-Path -LiteralPath $QemuPath).Path
 $kernel = Join-Path $images $KernelImage
 if (-not (Test-Path -LiteralPath $kernel)) { throw "Missing kernel image $kernel" }
 $serial = Join-Path $images "qemu-kikiaosp-$Tag.log"
@@ -77,6 +80,10 @@ if ($VirtioKeyboard) {
 $start = [System.Diagnostics.ProcessStartInfo]::new($qemu)
 $start.UseShellExecute = $false
 $start.CreateNoWindow = $true
+if (Test-Path -LiteralPath $Msys2Bin -PathType Container) {
+  # The native CLANGARM64 build resolves GTK/GLib runtime DLLs from MSYS2.
+  $start.Environment['PATH'] = "$Msys2Bin;$($start.Environment['PATH'])"
+}
 if ($MouseTouchFallback) {
   $start.Environment['KIKI_GTK_MOUSE_AS_TOUCH'] = '1'
 }

@@ -1,0 +1,17 @@
+diff --git a/ui/gtk.c b/ui/gtk.c
+index ed7ffc0..46cbab2 100644
+--- a/ui/gtk.c
++++ b/ui/gtk.c
+@@ -416,6 +416,12 @@ static void gd_update(DisplayChangeListener *dcl,
+                                fbx, fby, 0, 0, fbx, fby, fbw, fbh);
+     }
+ 
++#ifdef G_OS_WIN32
++    /* Keep the Windows GTK surface coherent when the guest submits partial damage. */
++    gd_update_full_redraw(vc);
++    return;
++#endif
++
+     wx1 = floor(fbx * vc->gfx.scale_x);
+     wy1 = floor(fby * vc->gfx.scale_y);
+ 

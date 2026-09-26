@@ -1,10 +1,19 @@
-# This repository tracks only the verified Windows launcher and its documentation.
-# The old experiments, build inputs, logs, and binary images stay local; Git history
-# retains previously committed material.
+# Runtime orchestration and QEMU source patches are tracked here. Built images,
+# QEMU source/build trees, screenshots and old experiments stay local.
 /*
 !/.gitignore
+!/.gitattributes
 !/README.md
+!/patches/
+/patches/*
+!/patches/qemu-windows-gtk-full-redraw.patch
+!/patches/qemu-windows-arm64-gtk-touch.patch
+!/profiles/
+/profiles/*
+!/profiles/launcher3-settings-20260926.json
 !/tools/
 /tools/*
+!/tools/build_qemu_arm64.sh
+!/tools/collect_kikiaosp_assets.ps1
 !/tools/run_kikiaosp_touch_local.ps1
 !/tools/capture_qemu_window.ps1

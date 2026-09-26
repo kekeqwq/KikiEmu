@@ -1,0 +1,8 @@
+# Keep source patches byte-compatible with git apply in MSYS2.
+/patches/*.patch text eol=lf
+/tools/*.sh text eol=lf
+/tools/*.ps1 text eol=lf
+/profiles/*.json text eol=lf
+/README.md text eol=lf
+/.gitignore text eol=lf
+/.gitattributes text eol=lf
