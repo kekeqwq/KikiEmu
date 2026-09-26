@@ -6,10 +6,14 @@ param(
   [string]$KernelImage = 'kernel-linux-7.3-rc4-4k-netfilter-20260925',
   [string]$SystemImage = 'system-kikiaosp-launcher3-settings-stable-20260926.img',
   [string]$VendorImage = 'vendor-kikiaosp-launcher3-settings-stable-20260926.img',
+  [switch]$NativeResolution,
+  [ValidateRange(400, 3840)][int]$PortraitWidthPixels = 864,
+  [ValidateRange(400, 3840)][int]$PortraitHeightPixels = 1728,
   [switch]$AudioStubOutput = $true,
   [switch]$VirtioKeyboard = $true,
   [switch]$MouseTouchFallback,
-  [switch]$InputTrace
+  [switch]$InputTrace,
+  [switch]$ResolutionTrace
 )
 
 # Verified Launcher3 + Settings baseline with guest multitouch and keyboard devices.
@@ -19,7 +23,11 @@ if ([string]::IsNullOrWhiteSpace($Tag)) {
 }
 $images = (Resolve-Path -LiteralPath $BundleDir).Path
 $qemu = (Resolve-Path -LiteralPath $QemuPath).Path
-$kernel = Join-Path $images $KernelImage
+$kernel = if ([IO.Path]::IsPathRooted($KernelImage)) {
+  $KernelImage
+} else {
+  Join-Path $images $KernelImage
+}
 if (-not (Test-Path -LiteralPath $kernel)) { throw "Missing kernel image $kernel" }
 $serial = Join-Path $images "qemu-kikiaosp-$Tag.log"
 $logcat = Join-Path $images "qemu-kikiaosp-$Tag.logcat"
@@ -48,7 +56,11 @@ $partitions = @(
   @('odm','odm-kikiaosp17-empty.img',$true)
 )
 foreach ($partition in $partitions) {
-  $path = Join-Path $images $partition[1]
+  $path = if ([IO.Path]::IsPathRooted($partition[1])) {
+    $partition[1]
+  } else {
+    Join-Path $images $partition[1]
+  }
   if (-not (Test-Path -LiteralPath $path)) { throw "Missing partition image $path" }
   $drive = "if=none,file=$path,format=raw,id=$($partition[0])"
   if ($partition[2]) { $drive += ',readonly=on' }
@@ -58,15 +70,17 @@ foreach ($partition in $partitions) {
   $arguments.Add("virtio-blk-pci,drive=$($partition[0])")
 }
 $logcatQemuPath = $logcat.Replace('\','/')
+$gpuResolution = if ($NativeResolution) { "xres=$PortraitWidthPixels,yres=$PortraitHeightPixels" } else { 'xres=1080,yres=2400' }
+$displayOptions = if ($NativeResolution) { 'gtk,gl=off,show-menubar=off' } else { 'gtk,gl=off' }
 foreach ($item in @(
-  '-device','virtio-gpu-pci,hostmem=256M,xres=1080,yres=2400',
+  '-device',"virtio-gpu-pci,hostmem=256M,$gpuResolution",
   '-device','virtio-multitouch-pci',
   '-netdev','user,id=net0,hostfwd=tcp:127.0.0.1:5555-:5555',
   '-device','virtio-net-pci,netdev=net0',
   '-device','virtio-serial-pci,id=kiki-serial',
   '-chardev',"file,id=kiki-logcat,path=$logcatQemuPath",
   '-device','virtconsole,chardev=kiki-logcat,bus=kiki-serial.0,name=org.kikiaosp.logcat',
-  '-display','gtk,gl=off',
+  '-display',$displayOptions,
   '-monitor','tcp:127.0.0.1:4447,server,nowait',
   '-serial',"file:$serial",'-snapshot'
 )) {
@@ -92,6 +106,16 @@ if ($InputTrace) {
   if (Test-Path -LiteralPath $inputTracePath) { throw "Refusing to overwrite $inputTracePath" }
   $start.Environment['KIKI_GTK_INPUT_TRACE'] = $inputTracePath
 }
+if ($ResolutionTrace) {
+  $resolutionTracePath = Join-Path $images "qemu-kikiaosp-$Tag.gtk-resolution.log"
+  if (Test-Path -LiteralPath $resolutionTracePath) { throw "Refusing to overwrite $resolutionTracePath" }
+  $start.Environment['KIKI_GTK_RESOLUTION_TRACE'] = $resolutionTracePath
+}
+if ($NativeResolution) {
+  $start.Environment['KIKI_GTK_NATIVE_PIXELS'] = '1'
+  $start.Environment['KIKI_GTK_START_WIDTH'] = [string]$PortraitWidthPixels
+  $start.Environment['KIKI_GTK_START_HEIGHT'] = [string]$PortraitHeightPixels
+}
 foreach ($item in $arguments) { $start.ArgumentList.Add($item) }
 $process = [System.Diagnostics.Process]::Start($start)
 Start-Sleep -Seconds 2
@@ -99,4 +123,4 @@ if ($process.HasExited) {
   throw "QEMU exited with code $($process.ExitCode); inspect the serial log at $serial"
 }
 $keyboardDevice = if ($VirtioKeyboard) { 'virtio-keyboard-pci' } else { 'none' }
-"QEMU_PID=$($process.Id) SERIAL=$serial LOGCAT=$logcat TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace"
+"QEMU_PID=$($process.Id) SERIAL=$serial LOGCAT=$logcat TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"
