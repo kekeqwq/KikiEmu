@@ -12,7 +12,7 @@
 
 `profiles/launcher3-settings-20260926.json` 是主分支稳定配对的文件名、字节数、SHA-256 和远端路径清单。它固定设备树源提交 `f26f688`、内核提交 `b43c32b`、QEMU 上游提交 `5f664cd`。185 开发机当前输出的 `system.img`（SHA-256 `002e6775…c830c85e`）和 `vendor.img`（`be0725a5…97b591be`）已经在 Windows ARM/WHPX 上一起启动过：`sys.boot_completed=1`，ADB、Launcher3、Settings 与真实多任务界面可用。QEMU 的 PE Machine 为 `0xAA64`，不是经 x86 转译的程序。
 
-`feature/native-resolution-20260926` 在这条稳定线之上完成了真实像素动态分辨率验证。Surface 的 Windows 桌面为 2880×1920、系统缩放为 200%；QEMU 默认手机窗口驱动客体为 864×1728，最大化后自动切换为 2784×1876，任意横向窗口实测为 2374×1530，恢复窗口又回到 864×1728。Windows 整桌截图逐项确认了 Android 的四边、状态栏、搜索框和三键导航完整可见，不再只显示左上角，也不是拉伸旧画布。三次模式切换中 SurfaceFlinger 和 Launcher3 PID 均未变化，触摸在分辨率稳定后可交互。本功能分支配套的内核 SHA-256 为 `e7ede20ab411b628f59f5345a7fa5da1155cd2a0a40dad45247f9498cacca06b`，实测 vendor SHA-256 为 `674652a3e965c36b20fd50eff2e3bd7c7a2ae1553cc8a76be3d1ed0925efb396`。
+真实像素动态分辨率已经收进主线，开发记录仍在 `feature/native-resolution-20260926`。Surface 的 Windows 桌面为 2880×1920、系统缩放为 200%；QEMU 默认手机窗口驱动客体为 864×1728，最大化后自动切换为 2784×1876，任意横向窗口实测为 2374×1530，恢复窗口又回到 864×1728。Windows 整桌截图逐项确认了 Android 的四边、状态栏、搜索框和三键导航完整可见，不再只显示左上角，也不是拉伸旧画布。三次模式切换中 SurfaceFlinger 和 Launcher3 PID 均未变化，触摸在分辨率稳定后可交互。配套内核 SHA-256 为 `e7ede20ab411b628f59f5345a7fa5da1155cd2a0a40dad45247f9498cacca06b`，实测 vendor SHA-256 为 `674652a3e965c36b20fd50eff2e3bd7c7a2ae1553cc8a76be3d1ed0925efb396`。
 
 运行时另需 `kikiaosp-runtime-support-20260926.tar.zst`，包含已经验证的启动 ramdisk、空 product/system_ext/odm、8 GiB F2FS userdata 与 misc。该压缩包只有约 21 MiB，当前保存在 185 的 `~/projects/kikiaosp_test/output/`，**不在 Git 中**；其中 ramdisk 并非当前 `m systemimage vendorimage` 的自动产物。收集脚本会验证压缩包及解出的每个文件，避免漏掉这项历史冻结依赖。换开发机时必须迁移同一压缩包；从新 AOSP 源码重新生成字节一致 ramdisk 的配方尚未完成。
 
@@ -107,11 +107,11 @@ adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c 
 
 截图写入 `~/Downloads/temp/`，不上传仓库。测试完请关闭 QEMU 窗口，避免占用桌面和端口。
 
-主分支稳定包只验证基本图形、Launcher3/Settings、多任务、通知栏与触摸/外接键盘路径；使用主分支配对时最大化仍会拉伸模糊。真实像素动态分辨率已在下述功能分支配对上验证，高刷、宿主 GPU 硬件渲染和真实扬声器播放仍未完成。
+主线代码已经包含真实像素动态分辨率。冻结的 launcher3-settings 镜像如果不加 `-NativeResolution`、也不换配套内核和 vendor，最大化仍会拉伸旧画布。高刷、宿主 GPU 硬件渲染和真实扬声器播放仍未完成。
 
-### 功能分支：真实像素动态分辨率
+### 主线：真实像素动态分辨率
 
-使用匹配的功能分支 kernel/vendor 产物时传入 `-NativeResolution`。初始尺寸按物理像素指定，默认是手机比例的 864×1728；Windows 200% 缩放下窗口客户区是 432×864 逻辑单位，但占用并显示 864×1728 个物理像素：
+使用配套内核和 vendor 时传入 `-NativeResolution`。初始尺寸按物理像素指定，默认是手机比例的 864×1728；Windows 200% 缩放下窗口客户区是 432×864 逻辑单位，但占用并显示 864×1728 个物理像素：
 
 ```powershell
 .\tools\run_kikiaosp_touch_local.ps1 `
@@ -123,4 +123,4 @@ adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c 
 
 窗口停止拖动约一秒后，QEMU 将客户区的物理像素尺寸通过 VirtIO GPU UIInfo/EDID 交给客体；内核等待 EDID 与 display-info 同步完成，HWC 在同一 Android 显示对象上更新参数。尺寸还没对齐时，GTK 把上一帧完整等比放进当前窗口，拖动过程中不会只剩左上角；对齐之后绘制回到一比一，Surface 200% 缩放下是一个客体像素对一个宿主物理像素。触摸坐标使用同一次绘制比例。模式切换时 virtio-gpu 会暂时保留上一帧，避免 Android 拆平面时闪成黑屏。
 
-本功能分支已验证 864×1728 → 2784×1876 → 864×1728，以及任意横向 2374×1530；这不等于高刷或宿主 GPU 加速已经完成。测试证据保存在本机 `~/Downloads/temp/`，其中整桌截图可能包含私人桌面背景，不提交或上传。
+主线已验证 864×1728 → 2784×1876 → 864×1728，以及任意横向 2374×1530；这不等于高刷或宿主 GPU 加速已经完成。测试证据保存在本机 `~/Downloads/temp/`，其中整桌截图可能包含私人桌面背景，不提交或上传。
