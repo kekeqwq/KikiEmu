@@ -66,7 +66,7 @@ pacman -S --needed git make ninja python pkgconf \
 ./tools/build_qemu_arm64.sh
 ```
 
-脚本从上游 QEMU 检出固定提交，依次应用 `patches/qemu-windows-gtk-full-redraw.patch` 与 `patches/qemu-windows-arm64-gtk-touch.patch`，再构建 `aarch64-softmmu` 的 GTK/WHPX 版本。第一份补丁修复 Windows GTK 部分重绘；第二份包含 Surface 原生 GDK 触摸、坐标映射、ARM64 MinGW 构建适配、GTK 窗口到 VirtIO GPU UIInfo 的动态尺寸传递，以及 Windows HiDPI 下客体像素到宿主物理像素的 1:1 Cairo 绘制比例。脚本遇到已有脏 QEMU 源码会拒绝覆盖；可传另一个空目录作参数。实测本机已有构建在 `tools/qemu-src/build/qemu-system-aarch64.exe`，运行时脚本会把 `C:\msys64\clangarm64\bin` 加入该进程的 DLL 搜索路径。单独复制 EXE 不等于可移植安装包，还需要匹配的 MSYS2 运行库。
+脚本从上游 QEMU 检出固定提交，依次应用 `patches/qemu-windows-gtk-full-redraw.patch`、`patches/qemu-windows-arm64-gtk-touch.patch` 和 `patches/qemu-windows-gtk-glarea-wgl.patch`，再构建 `aarch64-softmmu` 的 GTK/WHPX 版本。前两份补丁分别修复 Windows GTK 部分重绘，以及 Surface 原生 GDK 触摸、坐标映射、ARM64 MinGW 构建适配、动态尺寸和 HiDPI 1:1 绘制比例；第三份使 Windows GtkGLArea 使用 WGL 时不错误调用 EGL，供可选的 VirGL 路线使用。脚本遇到已有脏 QEMU 源码会拒绝覆盖；可传另一个空目录作参数。本机已有构建在 `tools/qemu-src/build/qemu-system-aarch64.exe`，运行时脚本会把 `C:\msys64\clangarm64\bin` 加入该进程的 DLL 搜索路径。单独复制 EXE 不等于可移植安装包，还需要匹配的 MSYS2 运行库。
 
 在 Windows PowerShell 中检查已构建 EXE 的 PE Machine（ARM64 为 `0xAA64`）：
 
@@ -108,6 +108,8 @@ adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c 
 截图写入 `~/Downloads/temp/`，不上传仓库。测试完请关闭 QEMU 窗口，避免占用桌面和端口。
 
 主线默认启动包含真实像素动态分辨率、Ethernet 和扬声器。点按音与铃声试听依赖当前 dma-buf 内核，以及 `media.c2.hal.selection=aidl` 的 system 镜像。高刷和宿主 GPU 硬件渲染仍未完成。关闭扬声器可传 `-SpeakerOutput:$false`，关闭动态分辨率可传 `-NativeResolution:$false`。
+
+GPU 加速实验记录见 [GPU_ACCELERATION.md](GPU_ACCELERATION.md)。功能分支增加了显式 `-GpuMode Virgl` 与 `-DryRun`；默认仍使用上述已验证的软件模式。只有配套 VirGL 镜像构建并通过验证后，才运行该实验模式。
 
 ### 主线：真实像素动态分辨率
 

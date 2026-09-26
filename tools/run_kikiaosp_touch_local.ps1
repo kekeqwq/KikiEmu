@@ -6,6 +6,7 @@ param(
   [string]$KernelImage = 'kernel-linux-7.3-rc4-4k-dmabuf',
   [string]$SystemImage = 'system-kikiaosp-network-audio-c2aidl.img',
   [string]$VendorImage = 'vendor-kikiaosp-network-audio-cap37.img',
+  [ValidateSet('Software', 'Virgl')][string]$GpuMode = 'Software',
   [switch]$NativeResolution = $true,
   [ValidateRange(400, 3840)][int]$PortraitWidthPixels = 864,
   [ValidateRange(400, 3840)][int]$PortraitHeightPixels = 1728,
@@ -14,11 +15,16 @@ param(
   [switch]$VirtioKeyboard = $true,
   [switch]$MouseTouchFallback,
   [switch]$InputTrace,
-  [switch]$ResolutionTrace
+  [switch]$ResolutionTrace,
+  [switch]$DryRun
 )
 
 # Verified Ethernet, speaker, and Codec2 UI-sound baseline.
 $ErrorActionPreference = 'Stop'
+if ($GpuMode -eq 'Virgl' -and -not $DryRun -and
+    $VendorImage -eq 'vendor-kikiaosp-network-audio-cap37.img') {
+  throw 'VirGL requires a vendor image containing Mesa VirGL. Pass -VendorImage with the new verified image.'
+}
 if ([string]::IsNullOrWhiteSpace($Tag)) {
   $Tag = "network-audio-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
 }
@@ -39,7 +45,8 @@ if (Get-NetTCPConnection -State Listen -LocalPort 4447,5555 -ErrorAction Silentl
   throw 'QEMU test ports 4447 or 5555 are already in use'
 }
 
-$append = 'earlycon=pl011,0x09000000 console=ttyAMA0 loglevel=8 printk.devkmsg=on audit=0 androidboot.hardware=ranchu androidboot.hardwareegl=angle androidboot.hardware.egl=angle androidboot.hardware.gralloc=minigbm androidboot.hardware.hwcomposer=ranchu androidboot.hardware.vulkan=pastel androidboot.hardware.hwcomposer.mode=client androidboot.hardware.hwcomposer.display_finder_mode=drm androidboot.hardware.guest_hwui_renderer=gles androidboot.debug.renderengine.backend=skiaglthreaded androidboot.selinux=permissive enforcing=0 androidboot.force_normal_boot=1 androidboot.verifiedbootstate=orange androidboot.init_fatal_reboot_target=none androidboot.adb.secure=0 binder.devices=binder,hwbinder,vndbinder'
+$eglDriver = if ($GpuMode -eq 'Virgl') { 'mesa' } else { 'angle' }
+$append = "earlycon=pl011,0x09000000 console=ttyAMA0 loglevel=8 printk.devkmsg=on audit=0 androidboot.hardware=ranchu androidboot.hardwareegl=$eglDriver androidboot.hardware.egl=$eglDriver androidboot.hardware.gralloc=minigbm androidboot.hardware.hwcomposer=ranchu androidboot.hardware.vulkan=pastel androidboot.hardware.hwcomposer.mode=client androidboot.hardware.hwcomposer.display_finder_mode=drm androidboot.hardware.guest_hwui_renderer=gles androidboot.debug.renderengine.backend=skiaglthreaded androidboot.selinux=permissive enforcing=0 androidboot.force_normal_boot=1 androidboot.verifiedbootstate=orange androidboot.init_fatal_reboot_target=none androidboot.adb.secure=0 binder.devices=binder,hwbinder,vndbinder"
 if ($SpeakerOutput) {
   $AudioStubOutput = $false
 }
@@ -75,9 +82,11 @@ foreach ($partition in $partitions) {
 }
 $logcatQemuPath = $logcat.Replace('\','/')
 $gpuResolution = if ($NativeResolution) { "xres=$PortraitWidthPixels,yres=$PortraitHeightPixels" } else { 'xres=1080,yres=2400' }
-$displayOptions = if ($NativeResolution) { 'gtk,gl=off,show-menubar=off' } else { 'gtk,gl=off' }
+$glOption = if ($GpuMode -eq 'Virgl') { 'on' } else { 'off' }
+$gpuDevice = if ($GpuMode -eq 'Virgl') { 'virtio-gpu-gl-pci' } else { 'virtio-gpu-pci' }
+$displayOptions = if ($NativeResolution) { "gtk,gl=$glOption,show-menubar=off" } else { "gtk,gl=$glOption" }
 foreach ($item in @(
-  '-device',"virtio-gpu-pci,hostmem=256M,$gpuResolution",
+  '-device',"$gpuDevice,hostmem=256M,$gpuResolution",
   '-device','virtio-multitouch-pci',
   '-netdev','user,id=net0,net=10.0.2.0/24,host=10.0.2.2,dns=10.0.2.3,hostfwd=tcp:127.0.0.1:5555-:5555',
   '-device','virtio-net-pci,netdev=net0',
@@ -99,6 +108,14 @@ if ($SpeakerOutput) {
 if ($VirtioKeyboard) {
   $arguments.Add('-device')
   $arguments.Add('virtio-keyboard-pci')
+}
+
+if ($DryRun) {
+  "QEMU_EXE=$qemu GPU_MODE=$GpuMode DRY_RUN=True"
+  for ($i = 0; $i -lt $arguments.Count; $i++) {
+    "QEMU_ARG[$i]=$($arguments[$i])"
+  }
+  return
 }
 
 $start = [System.Diagnostics.ProcessStartInfo]::new($qemu)
@@ -134,4 +151,4 @@ if ($process.HasExited) {
   throw "QEMU exited with code $($process.ExitCode); inspect the serial log at $serial"
 }
 $keyboardDevice = if ($VirtioKeyboard) { 'virtio-keyboard-pci' } else { 'none' }
-"QEMU_PID=$($process.Id) SERIAL=$serial LOGCAT=$logcat TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"
+"QEMU_PID=$($process.Id) SERIAL=$serial LOGCAT=$logcat GPU_MODE=$GpuMode TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"

@@ -1,0 +1,19 @@
+diff --git a/ui/gtk.c b/ui/gtk.c
+--- a/ui/gtk.c
++++ b/ui/gtk.c
+@@ -2730,4 +2730,14 @@ static void gl_area_realize(GtkGLArea *area, VirtualConsole *vc)
+ {
+     gtk_gl_area_make_current(area);
+-    qemu_egl_display = eglGetCurrentDisplay();
++#if defined(GDK_WINDOWING_WIN32)
++    if (GDK_IS_WIN32_DISPLAY(gdk_display_get_default())) {
++        /* GtkGLArea uses WGL here. No EGL entry points are current, and
++         * libepoxy may jump through a NULL EGL dispatch pointer. VirGL can
++         * use the GDK GL context callbacks without an EGL display. */
++        qemu_egl_display = EGL_NO_DISPLAY;
++    } else
++#endif
++    {
++        qemu_egl_display = eglGetCurrentDisplay();
++    }
+     vc->gfx.has_dmabuf = qemu_egl_has_dmabuf();

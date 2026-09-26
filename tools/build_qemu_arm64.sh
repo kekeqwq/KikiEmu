@@ -28,6 +28,8 @@ git -C "$source_dir" apply --check "$repo_root/patches/qemu-windows-gtk-full-red
 git -C "$source_dir" apply "$repo_root/patches/qemu-windows-gtk-full-redraw.patch"
 git -C "$source_dir" apply --check "$repo_root/patches/qemu-windows-arm64-gtk-touch.patch"
 git -C "$source_dir" apply "$repo_root/patches/qemu-windows-arm64-gtk-touch.patch"
+git -C "$source_dir" apply --check "$repo_root/patches/qemu-windows-gtk-glarea-wgl.patch"
+git -C "$source_dir" apply "$repo_root/patches/qemu-windows-gtk-glarea-wgl.patch"
 
 mkdir -p "$source_dir/build"
 (

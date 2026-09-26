@@ -1,0 +1,40 @@
+{
+  "id": "gpu-virgl-20260927",
+  "description": "Experimental Android 17 Mesa VirGL vendor image; 4 KiB kernel only, not yet guest-verified",
+  "aospBranch": "android17-release",
+  "deviceRepositoryCommit": "e6e155efdecd2a9972d58677169f7114938abca3",
+  "kernelRepositoryCommit": "ac04a340ad9efe14c7d7b7f288f1182e13cfbc04",
+  "qemuUpstreamCommit": "5f664cd37aec17e8145aa117d8da68f507edc8f1",
+  "kernel": {
+    "name": "kernel-linux-7.3-rc4-4k-dmabuf",
+    "source": "result/boot/kernel",
+    "bytes": 35613184,
+    "sha256": "f33ef2371736dfd75122eaaf277223321117b57e572e235b5b35f558aa14db96"
+  },
+  "system": {
+    "name": "system-kikiaosp-network-audio-c2aidl.img",
+    "source": "out/target/product/kikiaosp_test/system.img",
+    "bytes": 1051099136,
+    "sha256": "13c41b3d33b718075713d1472590a57b385f25610a2523bbe79d92a086df3636"
+  },
+  "vendor": {
+    "name": "vendor-kikiaosp-gpu-virgl.img",
+    "source": "out/target/product/kikiaosp_test/vendor.img",
+    "bytes": 99700736,
+    "sha256": "f60fee46addc3f6bdaa3ebe1f2aa55ce0eeafd1678c6f314d6279ff7d11ac4e7"
+  },
+  "supportArchive": {
+    "name": "kikiaosp-runtime-support-20260926.tar.zst",
+    "source": "output/kikiaosp-runtime-support-20260926.tar.zst",
+    "bytes": 21641351,
+    "sha256": "a8073fe77fc1e8a4e52f24af776955d6d9eae4ef5bd848d9dc703d8d4f1c363b"
+  },
+  "supportFiles": [
+    { "name": "kiki-kernel-ramdisk-rc4-clean-odm-adb.img", "bytes": 21372169, "sha256": "f36d932efd062b7dcc440fa9d4c2a18cb4414fcea05ad0c48eb89e15ad824131" },
+    { "name": "kiki-empty-product.img", "bytes": 4096, "sha256": "8319c323fefcdd4df5bf74efa8d342166e953c8c92d5d11b28173d766dcb49ee" },
+    { "name": "kiki-empty-system_ext.img", "bytes": 4096, "sha256": "a60e7eb41ac88facafa784799df0864049b0fb67c3264a76fc9fc0fce7a0a802" },
+    { "name": "userdata-kikiaosp17-f2fs.img", "bytes": 8589934592, "sha256": "ef599b4f275829df8e16fd29a2d8505470e70fe7efd4af18baefc7f9ca22281c" },
+    { "name": "misc.img", "bytes": 4194304, "sha256": "6374f685557c733c783cbb83853c68a3be18d0b16bb9658a17f685fcb7650413" },
+    { "name": "odm-kikiaosp17-empty.img", "bytes": 67108864, "sha256": "a35e49d5b5fb69b2aa3d2fd771a3b7779a620e5221754ef04e0d7e013d8bdb72" }
+  ]
+}
