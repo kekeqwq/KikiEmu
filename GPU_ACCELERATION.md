@@ -49,9 +49,9 @@ The QEMU build links virglrenderer 1.3.0. The original no-blob run negotiated `+
 
 The upstream references for this path are the [QEMU virtio-gpu documentation](https://www.qemu.org/docs/master/system/devices/virtio/virtio-gpu.html) and [AOSP Cuttlefish GPU modes](https://source.android.com/docs/devices/cuttlefish/gpu).
 
-## Fixed 864×1728 performance baseline
+## Minimum 864×1728 performance baseline
 
-The minimum usable portrait guest mode is fixed at **864×1728, 60 Hz**. The launcher now rejects startup display dimensions whose short side is below 864 or long side below 1728; landscape 1728×864 is accepted. The Android benchmark sets `glViewport()` to the actual `GLSurfaceView` dimensions and reports them on screen/logcat. No benchmark result is accepted after lowering guest resolution or using internal render scaling. The current full-desktop evidence, with QEMU left windowed and Android rendering the Extreme 3D scene, is `C:\Users\keke\Downloads\temp\qemu-desktop-gpu-bench-extreme-fixed-864x1728-20260927.png`.
+The minimum usable guest mode is **864×1728 pixels** (short side at least 864, long side at least 1728), not a fixed resolution. The cited benchmark session used 864×1728 at 60 Hz; the launcher allows larger dynamic modes and rejects anything below the floor. The Android benchmark sets `glViewport()` to the actual `GLSurfaceView` dimensions and reports them on screen/logcat. No benchmark result is accepted after lowering guest resolution or using internal render scaling. The current full-desktop evidence, with QEMU left windowed and Android rendering the Extreme 3D scene, is `C:\Users\keke\Downloads\temp\qemu-desktop-gpu-bench-extreme-fixed-864x1728-20260927.png`.
 
 At 864×1728, the 8-vCPU VirGL/blob run reports about **15–19 FPS** for the light “60 FPS target” profile and **13–19 FPS** for “Extreme 3D” (32,768 instanced objects; the fragment shader executes its 24-iteration ceiling). The guest display mode remains 60 Hz. On the host, QEMU's Adreno 3D engine sampled about 8% under the light profile and 18% under Extreme; a separate WGL probe identifies the host GL renderer as `D3D12 (Qualcomm(R) Adreno(TM) X1-85 GPU)`. The GPU is active, but low/medium utilization alongside poor frame rate points toward work submission/synchronization rather than simply insufficient pixel throughput. These are diagnostic measurements, not a 30–60 FPS success claim.
 
@@ -59,11 +59,11 @@ The Windows GTK frontend uses WGL `GtkGLArea`; the crash-avoidance patch deliber
 
 The host also exposes Qualcomm's native Adreno Vulkan 1.4 driver and Mesa Dozen Vulkan over D3D12. The guest currently contains only `vulkan.pastel.so` (software Vulkan), while QEMU/virglrenderer has a Venus capset path that requires blob and host memory. Venus is therefore a promising separate route for Vulkan workloads, but it is not enabled or validated in this image and cannot yet be counted as acceleration. It will need a compatible guest Venus Vulkan HAL and a full-system test. See [QEMU virtio-gpu options](https://www.qemu.org/docs/master/system/devices/virtio/virtio-gpu.html), [virglrenderer Venus capset](https://android.googlesource.com/platform/external/virglrenderer/+/refs/heads/main/src/venus_hw.h), and Microsoft's [OpenGL-on-D3D12 mapping-layer overview](https://devblogs.microsoft.com/directx/in-the-works-opencl-and-opengl-mapping-layers-to-directx/).
 
-## Fixed-resolution frame-wait diagnosis
+## Frame-wait diagnosis at the minimum resolution
 
 The benchmark now uses `GL_EXT_disjoint_timer_query` with a four-query asynchronous ring (results are polled only when available), and separately records CPU wall time, GL-thread CPU time, and the `glClear`/state/buffer/draw-call portions. Android confirms `GL_RENDERER=virgl`, GLES 3.1, `GLSurfaceView=864x1728`, and `wm size=864x1728` throughout these measurements.
 
-The supported launcher enforces 864x1728 as the minimum portrait mode (including either orientation by validating the shorter and longer sides) and rejects smaller dimensions. Performance comparisons must keep that floor and must not use internal render scaling.
+The supported launcher enforces 864x1728 as the minimum portrait dimensions (including either orientation by validating the shorter and longer sides) and rejects smaller dimensions. Performance comparisons may use a larger mode, but A/B runs must use the same mode and must not use internal render scaling.
 
 At this unchanged minimum resolution:
 
@@ -72,7 +72,7 @@ At this unchanged minimum resolution:
 | 60-FPS target, 1,024 instances | 0.5–1.2 ms | 48–51 ms | 1.3–2.9 ms | 17–20 |
 | Extreme, 32,768 instances | 4.4–8.3 ms | 47–56 ms | 0.9–5.5 ms | 16–19 |
 
-The draw submission itself takes roughly 0.03–0.08 ms and query polling about 0.02–0.09 ms. The measured `glClear` wall time is mostly a wait, not clear-command CPU work; guest GL-thread CPU consumption remains low. Reducing guest resolution or render scale would hide rather than solve it and is prohibited by the fixed 864x1728 baseline.
+The draw submission itself takes roughly 0.03–0.08 ms and query polling about 0.02–0.09 ms. The measured `glClear` wall time is mostly a wait, not clear-command CPU work; guest GL-thread CPU consumption remains low. Reducing guest resolution below the 864×1728 minimum or using render scale would hide rather than solve it and is not an acceptable optimization.
 
 In a five-second SurfaceFlinger sample during Extreme, GPU missed-frame count rose by 93, HWC missed-frame count stayed at zero, and the framebuffer output counter advanced by 88. These counts track the roughly 18-FPS producer, but do not on their own prove the Windows GTK refresh rate is the root cause.
 
@@ -86,7 +86,7 @@ To check whether GTK presentation was the limiting factor, the launcher gained a
 
 The SDL comparison kept the guest at **864x1728** and ran the same Extreme benchmark, but SDL exposed a 75 Hz mode while GTK exposed 60 Hz, so it is diagnostic rather than a perfectly refresh-matched A/B. SDL measured roughly **10–14 FPS**, 5–8 ms GPU draw time, 61–108 ms `glClear` wall time, and about 5% sampled Adreno 3D utilization. Returning to GTK at 864x1728 restored the stable path; the captured Extreme frame showed **16.8 FPS**, 6.31 ms GPU draw, and 0.03 ms CPU draw submission. SDL therefore did not improve throughput and is not the default. Evidence is in `bundles/gpu-virgl-native-20260927/qemu-kikiaosp-gpu-sdl-ab-fixed-864x1728-20260927.*` and `.../qemu-kikiaosp-gpu-gtk-restored-864x1728-20260927.*`; the full desktop capture is `C:\Users\keke\Downloads\temp\qemu-desktop-gpu-gtk-restored-fixed-864x1728-20260927.png`.
 
-The fixed **864x1728 minimum is a hard benchmark invariant**. Do not reduce guest mode, render scale, or benchmark resolution to raise the FPS number. The present result remains below target; continue tracing the buffer-release/fence wait and host VirGL presentation path. Windows GPU ETW capture could not be started under the current account policy, so this experiment used read-only Windows GPU-engine utilization sampling instead; do not treat that utilization snapshot as a precise per-frame attribution.
+The **864x1728 minimum is a hard benchmark floor**, not a fixed mode. Do not reduce below it or use render scale to raise the FPS number; for each A/B keep the guest mode unchanged. The present result remains below target; continue tracing the buffer-release/fence wait and host VirGL presentation path. Windows GPU ETW capture could not be started under the current account policy, so this experiment used read-only Windows GPU-engine utilization sampling instead; do not treat that utilization snapshot as a precise per-frame attribution.
 
 ### Live QEMU fence trace
 
@@ -138,7 +138,7 @@ The paired tests used the same 7.3-rc4 kernel, VirGL vendor image, 8 vCPUs, 4 Gi
 
 The 0.13 FPS difference is within run-to-run noise; the ranges overlap completely, and the candidate did not shorten the frame wait. The product-property experiment is therefore reverted and the default two-buffer setup retained. Candidate system image SHA-256: `d633e651de033e2e29e883384b8e0fbba95251f739d89e42171b9d81d3cfe653`. Both QEMU runs used `-snapshot`. The active test instance is restored to the unchanged two-buffer baseline at 864x1728. No resolution, viewport, or render-scale reduction was used; this experiment did not improve the roughly 15 FPS result.
 
-## Fixed-resolution bottleneck follow-up — 2026-09-27
+## Minimum-resolution bottleneck follow-up — 2026-09-27
 
 The minimum guest mode remains **864x1728 at 60 Hz**. The benchmark is still the same Extreme 3D scene with **32,768 instances**; no render-scale or workload reduction was used. Full-desktop evidence from the latest HWC Guest test is `C:\Users\keke\Downloads\temp\qemu-desktop-gpu-hwc-guest-ab-864x1728-20260927.png`; it shows the full benchmark window and its exact guest resolution label.
 
@@ -152,4 +152,14 @@ The host QEMU build exposes `venus=on`; a small host-only `virtio-gpu-gl-pci,blo
 
 The hard floor remains **864×1728** (or the same dimensions in landscape), and the benchmark remains the same Extreme 3D scene with **32,768 instances**. The launcher rejects smaller sizes, while the app sets `glViewport` to the actual `GLSurfaceView` pixels. No render-scale, guest-size, or workload reduction is allowed for an FPS result. The tests did not establish a stable 60-FPS result. The benchmark window was closed after capture; no QEMU process or ADB transport remains from this test.
 
-Next performance work stays on the proven Windows WGL + VirGL GLES route: preserve the 864×1728 mode and 32,768-instance workload, then trace guest buffer-release/present waits against host WGL/virglrenderer completion. Do not use lower resolution or internal render scaling as a workaround.
+Next performance work stays on the proven Windows WGL + VirGL GLES route: preserve at least the 864×1728 floor and the 32,768-instance workload, then trace guest buffer-release/present waits against host WGL/virglrenderer completion. Use an identical guest mode for each A/B; do not use below-floor resolution or internal render scaling as a workaround.
+
+## Global UI frame probe and notification-shade trace — 2026-09-27
+
+The first global UI test used a **1092×1728** guest mode (above the minimum), 8 notification-shade expand/collapse cycles, and the prior QEMU GL callback profile. Its three consecutive active 5-second windows reported 22.71, 26.57, and 25.76 host GTK GL callbacks/s (median **25.76**), with frame-interval P95 of 130, 108, and 93 ms. These are host callback measurements, not Windows DWM presents or a claim that Android rendered exactly that many app frames. Android `dumpsys gfxinfo com.android.systemui` counted 405 frames, 227 janky (56.05%), P50 57 ms, P90 150 ms, P95 200 ms, and P99 750 ms. This confirms that ordinary SystemUI motion is visibly far from the 60-FPS goal.
+
+The paired `atrace gfx view sched` capture during eight expand/collapse cycles was imported by Perfetto. `waitForBufferRelease` occurred 150 times (P50 20.065 ms, P95 38.350 ms, max 66.430 ms); `eglSwapBuffersWithDamageKHR` occurred 361 times (P50 2.123 ms, P95 13.715 ms, max 66.723 ms). SurfaceFlinger `postAndWait` averaged 18.92 ms over 207 slices; RenderEngine `OpsTask::onExecute` averaged 17.99 ms over 221 slices. HWC `flushToDisplay` was comparatively short (P50 0.209 ms, P95 1.662 ms over 273 slices). This narrows the visible jank to composition / buffer-release / synchronization work rather than the HWC display flush alone, but does **not** yet distinguish guest RenderEngine scheduling from the QEMU/VirGL fence and host WGL presentation path. Trace: `C:\Users\keke\Downloads\temp\kikiaosp-notification-shade-1092x1728-20260927.atrace`.
+
+An opt-in host profiler is now included in `patches/qemu-gtk-global-fps-profile.patch`; the reproducible QEMU build produced a separate `build-global-fps-r4/qemu-system-aarch64.exe` (SHA-256 `53f0238562e49924fa99da8d358fb0454554484ff6bdca60907118c54578c55e`) so the already-open QEMU was left untouched. It emits fixed 5-second records even during idle, reports flush/render counts, callback FPS, frame interval percentiles, >33/50/100 ms stalls, draw callback cost, queue delay, and idle gaps. The paired `tools/measure_kikiaosp_global_fps.ps1` can drive repeatable shade gestures and collect Android `gfxinfo`. Quiet intervals over one second are excluded from frame-time percentiles, and low-flush windows are excluded from the animation-only aggregate. The new binary compiled successfully, but its runtime output and the proposed `skiaglthreaded` versus `skiagl` SurfaceFlinger backend A/B still await the next controlled launch; the currently visible VM was not killed or replaced.
+
+For the next experiment, keep the resolution, system/vendor pair, kernel, QEMU GPU/blob path, HWC mode, vCPU/RAM and shade workload identical, and change only `androidboot.debug.renderengine.backend` between `skiaglthreaded` and `skiagl`. Collect the new host probe, `gfxinfo`, and a short Perfetto trace for each run. Treat a backend as an optimization only if the frame-time/jank improvement repeats without new display instability.

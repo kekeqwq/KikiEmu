@@ -34,6 +34,10 @@ git -C "$source_dir" apply --check "$repo_root/patches/qemu-windows-sdl-gl-wgl.p
 git -C "$source_dir" apply "$repo_root/patches/qemu-windows-sdl-gl-wgl.patch"
 git -C "$source_dir" apply --check "$repo_root/patches/qemu-windows-gtk-glarea-native-pixels.patch"
 git -C "$source_dir" apply "$repo_root/patches/qemu-windows-gtk-glarea-native-pixels.patch"
+git -C "$source_dir" apply --check "$repo_root/patches/qemu-gtk-native-resize-touch-focus.patch"
+git -C "$source_dir" apply "$repo_root/patches/qemu-gtk-native-resize-touch-focus.patch"
+git -C "$source_dir" apply --check "$repo_root/patches/qemu-gtk-global-fps-profile.patch"
+git -C "$source_dir" apply "$repo_root/patches/qemu-gtk-global-fps-profile.patch"
 
 mkdir -p "$source_dir/build"
 (

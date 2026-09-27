@@ -19,7 +19,7 @@
 ## 目录
 
 ```text
-patches/                           本机 QEMU 的两个下游源码补丁
+patches/                           本机 QEMU 的 Windows ARM、动态分辨率和诊断补丁
 profiles/                          已验证镜像配对及各文件哈希
 tools/build_qemu_arm64.sh           MSYS2 CLANGARM64 构建 QEMU
 tools/collect_kikiaosp_assets.ps1   SSH 取得并校验完整镜像组
@@ -66,7 +66,7 @@ pacman -S --needed git make ninja python pkgconf \
 ./tools/build_qemu_arm64.sh
 ```
 
-脚本从上游 QEMU 检出固定提交，依次应用 `patches/qemu-windows-gtk-full-redraw.patch`、`patches/qemu-windows-arm64-gtk-touch.patch` 和 `patches/qemu-windows-gtk-glarea-wgl.patch`，再构建 `aarch64-softmmu` 的 GTK/WHPX 版本。前两份补丁分别修复 Windows GTK 部分重绘，以及 Surface 原生 GDK 触摸、坐标映射、ARM64 MinGW 构建适配、动态尺寸和 HiDPI 1:1 绘制比例；第三份使 Windows GtkGLArea 使用 WGL 时不错误调用 EGL，供可选的 VirGL 路线使用。脚本遇到已有脏 QEMU 源码会拒绝覆盖；可传另一个空目录作参数。本机已有构建在 `tools/qemu-src/build/qemu-system-aarch64.exe`，运行时脚本会把 `C:\msys64\clangarm64\bin` 加入该进程的 DLL 搜索路径。单独复制 EXE 不等于可移植安装包，还需要匹配的 MSYS2 运行库。
+脚本从上游 QEMU 检出固定提交，应用 Windows ARM 触摸/重绘与 WGL 兼容补丁，再应用原生像素动态分辨率、缩放反馈修正、触摸优先输入和可选全局 GL 帧探针，构建 `aarch64-softmmu` 的 GTK/WHPX 版本。脚本遇到已有脏 QEMU 源码会拒绝覆盖；可传另一个空目录作参数。本机已验证构建在 `tools/qemu-src/build/qemu-system-aarch64.exe`；GPU 实验版通过 `-QemuPath` 指向对应的独立 QEMU 产物。运行时脚本会把 `C:\msys64\clangarm64\bin` 加入该进程的 DLL 搜索路径。单独复制 EXE 不等于可移植安装包，还需要匹配的 MSYS2 运行库。
 
 在 Windows PowerShell 中检查已构建 EXE 的 PE Machine（ARM64 为 `0xAA64`）：
 
@@ -120,7 +120,20 @@ GPU 加速实验记录见 [GPU_ACCELERATION.md](GPU_ACCELERATION.md)。功能分
   -GpuBlob
 ```
 
-GPU 性能对比固定使用 864×1728 作为最小可用手机模式；启动器会拒绝更低的启动分辨率。基准程序按客机完整视口渲染，不做内部缩放，不通过降低分辨率制造虚高 FPS。
+864×1728 是最小可用手机模式，不是固定分辨率；更高的动态尺寸可以使用。启动器会拒绝低于该下限的启动分辨率。每次 A/B 必须保持同一客机分辨率，基准程序按完整视口渲染，不做内部缩放，不通过降低分辨率制造虚高 FPS。
+
+GPU 功能分支的设备树已把默认显示密度设为 248 dpi，并把 SettingsProvider 的新用户默认字体缩放设为 1.3；增量 system/vendor 构建产物已完成资源和属性核验。支持的 SurfaceFlinger GL 后端可用 `-RenderEngineBackend skiaglthreaded`（默认）与 `-RenderEngineBackend skiagl` 做同尺寸对照。
+
+单个 APK 的 FPS 不等于桌面、通知栏的流畅度。GPU 功能分支的 QEMU 源码补丁 `patches/qemu-gtk-global-fps-profile.patch` 提供可选的宿主 GTK GL 渲染回调探针：启动时加 `-GlobalFpsProfile`，记下输出的 `GLOBAL_FPS_LOG` 路径；保持 QEMU 手机窗口大小不变，另开 PowerShell，在 15 秒采样期间实际下拉通知栏：
+
+```powershell
+.\tools\measure_kikiaosp_global_fps.ps1 `
+  -ProfileLog .\bundles\gpu-virgl-native-20260927\qemu-kikiaosp-<Tag>.global-fps.log `
+  -DurationSeconds 15 -Label notification-shade -UiPackage com.android.systemui `
+  -NotificationShadeAnimation
+```
+
+探针按固定 5 秒窗口写日志，即使画面静止也会采样；报告将所有窗口的平均回调率与有至少 5 次客机 scanout flush 的动画窗口分开统计，长于 1 秒的安静间隔不计入帧耗时百分位。`-NotificationShadeAnimation` 通过 ADB 重复展开/收起通知栏，结束时回到收起状态；不传此开关时可在采样期间手动操作。报告另外给出活动窗口帧间隔 P95/P99、超过 33/50/100 ms 的卡顿次数、QEMU GL 回调耗时，以及 `-UiPackage` 采到的 Android `gfxinfo` 帧数、卡顿比例、P95 耗时和高输入延迟次数。宿主回调不是 Windows DWM 最终屏幕呈现的直接计数，需与 Android `gfxinfo` 和真实窗口操作一并判断。
 
 ### 主线：真实像素动态分辨率
 

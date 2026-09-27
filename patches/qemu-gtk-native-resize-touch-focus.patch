@@ -1,0 +1,36 @@
+diff --git a/ui/gtk.c b/ui/gtk.c
+--- a/ui/gtk.c
++++ b/ui/gtk.c
+@@ -821,14 +821,17 @@ static void gd_resize_event(GtkGLArea *area,
+ 
++    if (g_strcmp0(g_getenv("KIKI_GTK_NATIVE_PIXELS"), "1") == 0) {
++        /* GtkGLArea's resize signal is already in physical pixels.  The
++         * drawing scale depends on the previous guest framebuffer size;
++         * dividing by it here feeds an old mode back into UIInfo and can
++         * leave the guest at 2x the actual host client area after a drag. */
++        gd_set_ui_size(vc, width, height);
++        return;
++    }
++
+     if (!vc->s->free_scale && !vc->s->full_screen) {
+         pw /= sx;
+         ph /= sy;
+     }
+ 
+-    /* GtkGLArea resize dimensions are already physical pixels.  Dividing
+-     * them by the host DPI scale would halve the native guest mode again. */
+-    if (g_strcmp0(g_getenv("KIKI_GTK_NATIVE_PIXELS"), "1") == 0) {
+-        gd_set_ui_size(vc, pw, ph);
+-    } else {
+-        gd_set_ui_size(vc, pw / gs, ph / gs);
+-    }
++    gd_set_ui_size(vc, pw / gs, ph / gs);
+ }
+@@ -1310,5 +1313,6 @@ static gboolean gd_button_event(GtkWidget *widget, GdkEventButton *button,
+     /* implicitly grab the input at the first click in the relative mode */
+     if (button->button == 1 && button->type == GDK_BUTTON_PRESS &&
+-        !qemu_input_is_absolute(vc->gfx.dcl.con) && s->ptr_owner != vc) {
++        !qemu_input_is_absolute(vc->gfx.dcl.con) && s->ptr_owner != vc &&
++        g_strcmp0(g_getenv("KIKI_GTK_TOUCH_FIRST"), "1") != 0) {
+         if (!vc->window) {
+             gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(s->grab_item),

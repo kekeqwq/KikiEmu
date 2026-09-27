@@ -8,6 +8,7 @@ param(
   [string]$VendorImage = 'vendor-kikiaosp-network-audio-cap37.img',
   [ValidateSet('Software', 'Virgl')][string]$GpuMode = 'Software',
   [ValidateSet('Client', 'Guest')][string]$HwcMode = 'Client',
+  [ValidateSet('skiaglthreaded', 'skiagl')][string]$RenderEngineBackend = 'skiaglthreaded',
   [ValidateSet('gtk', 'sdl')][string]$DisplayBackend = 'gtk',
   [switch]$GpuBlob,
   [ValidateRange(1, 16)][int]$VcpuCount = 4,
@@ -22,6 +23,7 @@ param(
   [switch]$InputTrace,
   [switch]$ResolutionTrace,
   [switch]$TraceVirglFences,
+  [switch]$GlobalFpsProfile,
   [switch]$DryRun
 )
 
@@ -59,18 +61,22 @@ if (-not (Test-Path -LiteralPath $kernel)) { throw "Missing kernel image $kernel
 $serial = Join-Path $images "qemu-kikiaosp-$Tag.log"
 $logcat = Join-Path $images "qemu-kikiaosp-$Tag.logcat"
 $qemuTrace = Join-Path $images "qemu-kikiaosp-$Tag.qemu-trace.log"
+$globalFpsLog = Join-Path $images "qemu-kikiaosp-$Tag.global-fps.log"
 foreach ($path in @($serial, $logcat)) {
   if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite $path" }
 }
 if ($TraceVirglFences -and (Test-Path -LiteralPath $qemuTrace)) {
   throw "Refusing to overwrite $qemuTrace"
 }
+if ($GlobalFpsProfile -and (Test-Path -LiteralPath $globalFpsLog)) {
+  throw "Refusing to overwrite $globalFpsLog"
+}
 if (-not $DryRun -and (Get-NetTCPConnection -State Listen -LocalPort 4447,5555 -ErrorAction SilentlyContinue)) {
   throw 'QEMU test ports 4447 or 5555 are already in use'
 }
 
 $eglDriver = if ($GpuMode -eq 'Virgl') { 'mesa' } else { 'angle' }
-$append = "earlycon=pl011,0x09000000 console=ttyAMA0 loglevel=$KernelLogLevel printk.devkmsg=on audit=0 androidboot.hardware=ranchu androidboot.hardwareegl=$eglDriver androidboot.hardware.egl=$eglDriver androidboot.hardware.gralloc=minigbm androidboot.hardware.hwcomposer=ranchu androidboot.hardware.vulkan=pastel androidboot.hardware.hwcomposer.mode=$($HwcMode.ToLowerInvariant()) androidboot.hardware.hwcomposer.display_finder_mode=drm androidboot.hardware.guest_hwui_renderer=gles androidboot.debug.renderengine.backend=skiaglthreaded androidboot.selinux=permissive enforcing=0 androidboot.force_normal_boot=1 androidboot.verifiedbootstate=orange androidboot.init_fatal_reboot_target=none androidboot.adb.secure=0 binder.devices=binder,hwbinder,vndbinder"
+$append = "earlycon=pl011,0x09000000 console=ttyAMA0 loglevel=$KernelLogLevel printk.devkmsg=on audit=0 androidboot.hardware=ranchu androidboot.hardwareegl=$eglDriver androidboot.hardware.egl=$eglDriver androidboot.hardware.gralloc=minigbm androidboot.hardware.hwcomposer=ranchu androidboot.hardware.vulkan=pastel androidboot.hardware.hwcomposer.mode=$($HwcMode.ToLowerInvariant()) androidboot.hardware.hwcomposer.display_finder_mode=drm androidboot.hardware.guest_hwui_renderer=gles androidboot.debug.renderengine.backend=$RenderEngineBackend androidboot.selinux=permissive enforcing=0 androidboot.force_normal_boot=1 androidboot.verifiedbootstate=orange androidboot.init_fatal_reboot_target=none androidboot.adb.secure=0 binder.devices=binder,hwbinder,vndbinder"
 if ($SpeakerOutput) {
   $AudioStubOutput = $false
 }
@@ -151,7 +157,7 @@ if ($VirtioKeyboard) {
 }
 
 if ($DryRun) {
-  "QEMU_EXE=$qemu GPU_MODE=$GpuMode HWC_MODE=$HwcMode GPU_BLOB=$GpuBlob VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel DRY_RUN=True"
+  "QEMU_EXE=$qemu GPU_MODE=$GpuMode HWC_MODE=$HwcMode RENDERENGINE_BACKEND=$RenderEngineBackend GPU_BLOB=$GpuBlob VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel GLOBAL_FPS_PROFILE=$GlobalFpsProfile DRY_RUN=True"
   for ($i = 0; $i -lt $arguments.Count; $i++) {
     "QEMU_ARG[$i]=$($arguments[$i])"
   }
@@ -161,6 +167,7 @@ if ($DryRun) {
 $start = [System.Diagnostics.ProcessStartInfo]::new($qemu)
 $start.UseShellExecute = $false
 $start.CreateNoWindow = $true
+$start.Environment['KIKI_GTK_TOUCH_FIRST'] = '1'
 if (Test-Path -LiteralPath $Msys2Bin -PathType Container) {
   # The native CLANGARM64 build resolves GTK/GLib runtime DLLs from MSYS2.
   $start.Environment['PATH'] = "$Msys2Bin;$($start.Environment['PATH'])"
@@ -172,6 +179,10 @@ if ($InputTrace) {
   $inputTracePath = Join-Path $images "qemu-kikiaosp-$Tag.gtk-input.log"
   if (Test-Path -LiteralPath $inputTracePath) { throw "Refusing to overwrite $inputTracePath" }
   $start.Environment['KIKI_GTK_INPUT_TRACE'] = $inputTracePath
+}
+if ($GlobalFpsProfile) {
+  $start.Environment['KIKI_GPU_PROFILE'] = '1'
+  $start.Environment['KIKI_GPU_PROFILE_PATH'] = $globalFpsLog
 }
 if ($ResolutionTrace) {
   $resolutionTracePath = Join-Path $images "qemu-kikiaosp-$Tag.gtk-resolution.log"
@@ -200,4 +211,4 @@ $helperArguments = "-NoProfile -File `"$displayHelperPath`" -Serial 127.0.0.1:55
 $displayProcess = Start-Process -FilePath $pwshPath -ArgumentList $helperArguments `
   -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru
 $keyboardDevice = if ($VirtioKeyboard) { 'virtio-keyboard-pci' } else { 'none' }
-"QEMU_PID=$($process.Id) DISPLAY_HELPER_PID=$($displayProcess.Id) DISPLAY_BACKEND=$DisplayBackend DISPLAY_LOG=$displayLog SERIAL=$serial LOGCAT=$logcat QEMU_TRACE=$($TraceVirglFences ? $qemuTrace : 'off') GPU_MODE=$GpuMode HWC_MODE=$HwcMode GPU_BLOB=$GpuBlob VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"
+"QEMU_PID=$($process.Id) DISPLAY_HELPER_PID=$($displayProcess.Id) DISPLAY_BACKEND=$DisplayBackend DISPLAY_LOG=$displayLog SERIAL=$serial LOGCAT=$logcat QEMU_TRACE=$($TraceVirglFences ? $qemuTrace : 'off') GLOBAL_FPS_LOG=$($GlobalFpsProfile ? $globalFpsLog : 'off') GPU_MODE=$GpuMode HWC_MODE=$HwcMode RENDERENGINE_BACKEND=$RenderEngineBackend GPU_BLOB=$GpuBlob VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"

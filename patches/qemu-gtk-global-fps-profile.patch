@@ -1,0 +1,181 @@
+diff --git a/ui/gtk-gl-area.c b/ui/gtk-gl-area.c
+index effd88f..2b6c3e2 100644
+--- a/ui/gtk-gl-area.c
++++ b/ui/gtk-gl-area.c
+@@ -18,6 +18,117 @@
+ 
+ #include "system/system.h"
+ 
++/* Opt-in host-side timing for the real-size VirGL performance investigation. */
++static struct {
++    int enabled;
++    gint64 period_start_us;
++    gint64 last_flush_us;
++    gint64 last_render_start_us;
++    guint flushes;
++    guint renders;
++    guint queue_samples;
++    guint interval_count;
++    guint stalls_33ms;
++    guint stalls_50ms;
++    guint stalls_100ms;
++    guint idle_gaps;
++    gint64 intervals_us[1024];
++    gint64 draw_total_us;
++    gint64 draw_max_us;
++    gint64 queue_total_us;
++} kiki_gl_profile = { .enabled = -1 };
++
++static int kiki_gl_compare_interval(const void *a, const void *b)
++{
++    const gint64 left = *(const gint64 *)a;
++    const gint64 right = *(const gint64 *)b;
++    return (left > right) - (left < right);
++}
++
++static gboolean kiki_gl_profile_report(gpointer opaque)
++{
++    const char *profile_path = g_getenv("KIKI_GPU_PROFILE_PATH");
++    FILE *profile_output = profile_path ? fopen(profile_path, "a") : NULL;
++    gint64 now_us = g_get_monotonic_time();
++    gint64 elapsed_us = now_us - kiki_gl_profile.period_start_us;
++    double p50_ms = 0.0, p95_ms = 0.0, p99_ms = 0.0;
++    guint interval_count = 0;
++    guint i;
++
++    (void)opaque;
++
++    if (elapsed_us <= 0) {
++        return G_SOURCE_CONTINUE;
++    }
++    for (i = 0; i < kiki_gl_profile.interval_count; i++) {
++        /* Ignore long quiet periods in frame-time percentiles. The fixed
++         * window FPS below still reports that the guest was idle. */
++        if (kiki_gl_profile.intervals_us[i] <= G_USEC_PER_SEC) {
++            kiki_gl_profile.intervals_us[interval_count++] =
++                kiki_gl_profile.intervals_us[i];
++        }
++    }
++    if (interval_count) {
++        qsort(kiki_gl_profile.intervals_us, interval_count,
++              sizeof(kiki_gl_profile.intervals_us[0]), kiki_gl_compare_interval);
++        p50_ms = kiki_gl_profile.intervals_us[interval_count / 2] / 1000.0;
++        p95_ms = kiki_gl_profile.intervals_us[(interval_count * 95 - 1) / 100] / 1000.0;
++        p99_ms = kiki_gl_profile.intervals_us[(interval_count * 99 - 1) / 100] / 1000.0;
++    }
++    if (!profile_output) {
++        profile_output = stderr;
++    }
++    fprintf(profile_output,
++            "KIKI-QEMU-GL-PROFILE span=%.3fs flush=%u render=%u "
++            "fps=%.2f frame_p50=%.3fms frame_p95=%.3fms frame_p99=%.3fms "
++            "stalls33=%u stalls50=%u stalls100=%u idle_gaps=%u "
++            "draw_avg=%.3fms draw_max=%.3fms queue_avg=%.3fms\n",
++            elapsed_us / 1000000.0, kiki_gl_profile.flushes, kiki_gl_profile.renders,
++            kiki_gl_profile.renders * 1000000.0 / elapsed_us,
++            p50_ms, p95_ms, p99_ms,
++            kiki_gl_profile.stalls_33ms,
++            kiki_gl_profile.stalls_50ms,
++            kiki_gl_profile.stalls_100ms,
++            kiki_gl_profile.idle_gaps,
++            kiki_gl_profile.renders ?
++                kiki_gl_profile.draw_total_us / (1000.0 * kiki_gl_profile.renders) : 0.0,
++            kiki_gl_profile.draw_max_us / 1000.0,
++            kiki_gl_profile.queue_samples ?
++                kiki_gl_profile.queue_total_us / (1000.0 * kiki_gl_profile.queue_samples) : 0.0);
++    if (profile_output != stderr) {
++        fclose(profile_output);
++    }
++
++    kiki_gl_profile.period_start_us = now_us;
++    /* A scanout without a draw in this window must not leak its queue delay
++     * into the next fixed reporting window. */
++    kiki_gl_profile.last_flush_us = 0;
++    kiki_gl_profile.flushes = 0;
++    kiki_gl_profile.renders = 0;
++    kiki_gl_profile.queue_samples = 0;
++    kiki_gl_profile.interval_count = 0;
++    kiki_gl_profile.stalls_33ms = 0;
++    kiki_gl_profile.stalls_50ms = 0;
++    kiki_gl_profile.stalls_100ms = 0;
++    kiki_gl_profile.idle_gaps = 0;
++    kiki_gl_profile.draw_total_us = 0;
++    kiki_gl_profile.draw_max_us = 0;
++    kiki_gl_profile.queue_total_us = 0;
++    return G_SOURCE_CONTINUE;
++}
++
++static bool kiki_gl_profile_enabled(void)
++{
++    if (kiki_gl_profile.enabled < 0) {
++        kiki_gl_profile.enabled = g_strcmp0(g_getenv("KIKI_GPU_PROFILE"), "1") == 0;
++        if (kiki_gl_profile.enabled) {
++            kiki_gl_profile.period_start_us = g_get_monotonic_time();
++            g_timeout_add_seconds(5, kiki_gl_profile_report, NULL);
++        }
++    }
++    return kiki_gl_profile.enabled;
++}
++
+ static void gtk_gl_area_set_scanout_mode(VirtualConsole *vc, bool scanout)
+ {
+     if (vc->gfx.scanout_mode == scanout) {
+@@ -48,6 +156,31 @@ void gd_gl_area_draw(VirtualConsole *vc)
+     int ww_surface, wh_surface;
+     int fbw, fbh;
+     int wx_offset, wy_offset;
++    gint64 profile_start_us = 0;
++
++    if (kiki_gl_profile_enabled()) {
++        profile_start_us = g_get_monotonic_time();
++        if (kiki_gl_profile.last_render_start_us) {
++            gint64 interval_us = profile_start_us - kiki_gl_profile.last_render_start_us;
++            if (kiki_gl_profile.interval_count < G_N_ELEMENTS(kiki_gl_profile.intervals_us)) {
++                kiki_gl_profile.intervals_us[kiki_gl_profile.interval_count++] = interval_us;
++            }
++            if (interval_us > G_USEC_PER_SEC) {
++                kiki_gl_profile.idle_gaps++;
++            } else {
++                kiki_gl_profile.stalls_33ms += interval_us > 33333;
++                kiki_gl_profile.stalls_50ms += interval_us > 50000;
++                kiki_gl_profile.stalls_100ms += interval_us > 100000;
++            }
++        }
++        kiki_gl_profile.last_render_start_us = profile_start_us;
++        if (kiki_gl_profile.last_flush_us) {
++            kiki_gl_profile.queue_total_us +=
++                profile_start_us - kiki_gl_profile.last_flush_us;
++            kiki_gl_profile.queue_samples++;
++            kiki_gl_profile.last_flush_us = 0;
++        }
++    }
+ 
+     if (!vc->gfx.gls || !vc->gfx.ds) {
+         return;
+@@ -135,6 +268,14 @@ void gd_gl_area_draw(VirtualConsole *vc)
+         surface_gl_setup_viewport(vc->gfx.gls, vc->gfx.ds, pw, ph);
+         surface_gl_render_texture(vc->gfx.gls, vc->gfx.ds);
+     }
++
++    if (profile_start_us) {
++        gint64 now_us = g_get_monotonic_time();
++        gint64 draw_us = now_us - profile_start_us;
++        kiki_gl_profile.renders++;
++        kiki_gl_profile.draw_total_us += draw_us;
++        kiki_gl_profile.draw_max_us = MAX(kiki_gl_profile.draw_max_us, draw_us);
++    }
+ }
+ 
+ void gd_gl_area_update(DisplayChangeListener *dcl,
+@@ -319,6 +460,11 @@ void gd_gl_area_scanout_flush(DisplayChangeListener *dcl,
+ {
+     VirtualConsole *vc = container_of(dcl, VirtualConsole, gfx.dcl);
+ 
++    if (kiki_gl_profile_enabled()) {
++        kiki_gl_profile.flushes++;
++        kiki_gl_profile.last_flush_us = g_get_monotonic_time();
++    }
++
+     if (vc->gfx.guest_fb.dmabuf && !vc->gfx.draw_submitted) {
+         vc->gfx.draw_submitted = true;
+         gtk_gl_area_set_scanout_mode(vc, true);

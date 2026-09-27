@@ -11,6 +11,8 @@
 !/patches/qemu-windows-arm64-gtk-touch.patch
 !/patches/qemu-windows-gtk-glarea-wgl.patch
 !/patches/qemu-windows-gtk-glarea-native-pixels.patch
+!/patches/qemu-gtk-global-fps-profile.patch
+!/patches/qemu-gtk-native-resize-touch-focus.patch
 !/profiles/
 /profiles/*
 !/profiles/launcher3-settings-20260926.json
@@ -25,6 +27,7 @@
 !/tools/run_kikiaosp_touch_local.ps1
 !/tools/qemu-virgl-fence-events.txt
 !/tools/capture_qemu_window.ps1
+!/tools/measure_kikiaosp_global_fps.ps1
 !/tools/probe_wgl_adreno.c
 !/tools/gpu-bench/
 !/tools/gpu-bench/**
