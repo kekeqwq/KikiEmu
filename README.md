@@ -109,7 +109,7 @@ adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c 
 
 主线默认启动包含真实像素动态分辨率、Ethernet 和扬声器。点按音与铃声试听依赖当前 dma-buf 内核，以及 `media.c2.hal.selection=aidl` 的 system 镜像。VirGL 已能经 Adreno 渲染，但帧率离日用目标仍有明显差距，高刷也未达标。关闭扬声器可传 `-SpeakerOutput:$false`，关闭动态分辨率可传 `-NativeResolution:$false`。
 
-GPU 加速实验记录见 [GPU_ACCELERATION.md](GPU_ACCELERATION.md)。功能分支增加了显式 `-GpuMode Virgl`、`-GpuBlob` 与 `-DryRun`。Mesa VirGL 已经在 Adreno 上渲染出 Android Settings；当前原生 864×1728 受控滑动中位帧耗时约 69ms，仍在优化。`-GpuBlob` 用来验证 QEMU 共享 GPU 内存路径，必须搭配本功能分支的 Mesa 镜像，例如：
+GPU 加速实验记录见 [GPU_ACCELERATION.md](GPU_ACCELERATION.md)。功能分支增加了显式 `-GpuMode Virgl`、`-GpuBlob` 与 `-DryRun`。Mesa VirGL 已经在 Adreno 上渲染出 Android Settings；8 核、4 GiB、Windows 平衡电源模式下，真实桌面和通知栏动画仍明显掉帧，尚未达到稳定日用帧率。继续优化以正常资源预算为约束，不靠占满宿主核心或缩小分辨率。`-GpuBlob` 用来验证 QEMU 共享 GPU 内存路径，必须搭配本功能分支的 Mesa 镜像，例如：
 
 ```powershell
 .\tools\run_kikiaosp_touch_local.ps1 `
@@ -129,11 +129,11 @@ GPU 功能分支的设备树已把默认显示密度设为 248 dpi，并把 Sett
 ```powershell
 .\tools\measure_kikiaosp_global_fps.ps1 `
   -ProfileLog .\bundles\gpu-virgl-native-20260927\qemu-kikiaosp-<Tag>.global-fps.log `
-  -DurationSeconds 15 -Label notification-shade -UiPackage com.android.systemui `
+  -DurationSeconds 15 -Label notification-shade -UiPackages com.android.systemui,com.android.launcher3 `
   -NotificationShadeAnimation
 ```
 
-探针按固定 5 秒窗口写日志，即使画面静止也会采样；报告将所有窗口的平均回调率与有至少 5 次客机 scanout flush 的动画窗口分开统计，长于 1 秒的安静间隔不计入帧耗时百分位。`-NotificationShadeAnimation` 通过 ADB 重复展开/收起通知栏，结束时回到收起状态；不传此开关时可在采样期间手动操作。报告另外给出活动窗口帧间隔 P95/P99、超过 33/50/100 ms 的卡顿次数、QEMU GL 回调耗时，以及 `-UiPackage` 采到的 Android `gfxinfo` 帧数、卡顿比例、P95 耗时和高输入延迟次数。宿主回调不是 Windows DWM 最终屏幕呈现的直接计数，需与 Android `gfxinfo` 和真实窗口操作一并判断。
+探针按固定 5 秒窗口写日志，即使画面静止也会采样；报告将所有窗口的平均回调率与有至少 5 次客机 scanout flush 的窗口分开统计，长于 1 秒的安静间隔不计入帧耗时百分位。窗口如果跨过动画开始/结束，也可能有低帧率和 `idle_gaps`，比较时须查看各窗口记录。`-NotificationShadeAnimation` 通过 ADB 重复展开/收起通知栏；可改用 `-DesktopNavigationAnimation` 测试 HOME、应用抽屉、设置和多任务，不传时可手动操作。报告还给出 Android `gfxinfo`、SurfaceFlinger 错帧计数差值、活动窗口 P95/P99 与 QEMU GL 回调耗时。宿主回调不是 Windows DWM 最终屏幕呈现的直接计数，需与 Android 数据和真实窗口操作一并判断。
 
 ### 主线：真实像素动态分辨率
 
