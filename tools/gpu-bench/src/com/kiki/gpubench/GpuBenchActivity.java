@@ -1,20 +1,20 @@
 package com.kiki.gpubench;
 
 import android.app.Activity;
-import android.graphics.Color;
 import android.opengl.GLES30;
 import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
 import android.os.Debug;
 import android.os.Bundle;
 import android.util.Log;
-import android.view.Gravity;
+import android.graphics.PixelFormat;
+import android.view.Surface;
+import android.view.SurfaceHolder;
 import android.view.View;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.FrameLayout;
-import android.widget.LinearLayout;
-import android.widget.TextView;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -25,70 +25,95 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public final class GpuBenchActivity extends Activity {
     private static final String TAG = "KikiGpuBench";
+    static {
+        System.loadLibrary("kikigpubench_buffer_probe");
+    }
+
+    private static native int nativeSetBufferCount(Surface surface, int count);
+
+    private static final class BenchSurfaceView extends GLSurfaceView {
+        private final int requestedBufferCount;
+
+        BenchSurfaceView(Activity activity, int bufferCount) {
+            super(activity);
+            requestedBufferCount = bufferCount;
+        }
+
+        @Override
+        public void surfaceCreated(SurfaceHolder holder) {
+            if (requestedBufferCount >= 3 && requestedBufferCount <= 5) {
+                int result = nativeSetBufferCount(holder.getSurface(), requestedBufferCount);
+                Log.i(TAG, "BUFFER_COUNT_REQUEST=" + requestedBufferCount + " RESULT=" + result);
+            }
+            super.surfaceCreated(holder);
+        }
+    }
+
     private BenchRenderer renderer;
-    private TextView fpsDisplay;
-    private TextView details;
 
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                | WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
         FrameLayout root = new FrameLayout(this);
-        GLSurfaceView surface = new GLSurfaceView(this);
+        int bufferCount = getIntent().getIntExtra("buffer_count", 0);
+        GLSurfaceView surface = new BenchSurfaceView(this, bufferCount);
+        surface.setZOrderOnTop(true);
+        surface.getHolder().setFormat(PixelFormat.OPAQUE);
         surface.setEGLContextClientVersion(3);
-        surface.setEGLConfigChooser(8, 8, 8, 0, 24, 8);
+        surface.setEGLConfigChooser(8, 8, 8, 0, 24, 0);
         renderer = new BenchRenderer(this);
         surface.setRenderer(renderer);
         surface.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
-        root.addView(surface, new FrameLayout.LayoutParams(-1, -1));
-
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(14, 8, 14, 8);
-        panel.setBackgroundColor(0xCC101820);
-        FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
-        root.addView(panel, panelParams);
-
-        fpsDisplay = new TextView(this);
-        fpsDisplay.setTextColor(0xFF70FF9A);
-        fpsDisplay.setTextSize(54);
-        fpsDisplay.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD);
-        fpsDisplay.setText("-- FPS");
-        panel.addView(fpsDisplay, new LinearLayout.LayoutParams(-1, -2));
-
-        details = new TextView(this);
-        details.setTextColor(Color.WHITE);
-        details.setTextSize(14);
-        details.setTypeface(android.graphics.Typeface.MONOSPACE);
-        details.setText("60 FPS target  |  Starting GLES 3D stress scene...");
-        panel.addView(details, new LinearLayout.LayoutParams(-1, -2));
-
-        LinearLayout controls = new LinearLayout(this);
-        controls.setOrientation(LinearLayout.HORIZONTAL);
-        panel.addView(controls, new LinearLayout.LayoutParams(-1, -2));
-        addProfileButton(controls, "60 target", BenchRenderer.PROFILE_TARGET);
-        addProfileButton(controls, "Game load", BenchRenderer.PROFILE_GAME);
-        addProfileButton(controls, "Extreme", BenchRenderer.PROFILE_STRESS);
-
+        root.addView(surface, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         setContentView(root);
+        getWindow().setDecorFitsSystemWindows(false);
+        applyImmersiveMode();
+        Log.i(TAG, "SINGLE_OPAQUE_LAYER=1");
     }
 
-    private void addProfileButton(LinearLayout row, String label, int profile) {
-        Button button = new Button(this);
-        button.setText(label);
-        button.setTextSize(12);
-        button.setPadding(2, 0, 2, 0);
-        row.addView(button, new LinearLayout.LayoutParams(0, 42, 1));
-        button.setOnClickListener(v -> renderer.selectProfile(profile));
+    @Override
+    protected void onResume() {
+        super.onResume();
+        applyImmersiveMode();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            applyImmersiveMode();
+        }
+    }
+
+    private void applyImmersiveMode() {
+        View decor = getWindow().getDecorView();
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        decor.setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+        WindowInsetsController insets = decor.getWindowInsetsController();
+        if (insets != null) {
+            insets.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+            insets.setSystemBarsBehavior(
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        }
     }
 
     private void showStats(String fps, String detail, float rate) {
-        runOnUiThread(() -> {
-            fpsDisplay.setText(fps);
-            fpsDisplay.setTextColor(rate >= 59.0f ? 0xFF70FF9A : rate >= 30.0f ? 0xFFFFD45C : 0xFFFF6B6B);
-            details.setText(detail);
-        });
+        // The digits are drawn into the same GL buffer. A second Android view would
+        // force client composition and hide the direct-scanout path.
+        if (fps == null || detail == null || rate < -1f) {
+            return;
+        }
     }
 
     private static final class BenchRenderer implements GLSurfaceView.Renderer {
@@ -182,6 +207,24 @@ public final class GpuBenchActivity extends Activity {
         private int cpuSamples;
         private double minFps = Double.MAX_VALUE;
         private String rendererName = "unknown";
+        private double displayedFps;
+        private int overlayProgram;
+        private int overlayBuffer;
+        private int overlayScaleLocation;
+        private int overlayOffsetLocation;
+        private int overlayColorLocation;
+        private static final int[] DIGIT_MASKS = {
+                0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F
+        };
+        private static final String OVERLAY_VERTEX =
+                "#version 300 es\n" +
+                "layout(location=0) in vec2 aPos;\n" +
+                "uniform vec2 uScale; uniform vec2 uOffset;\n" +
+                "void main(){ gl_Position = vec4(aPos * uScale + uOffset, 0.0, 1.0); }\n";
+        private static final String OVERLAY_FRAGMENT =
+                "#version 300 es\nprecision mediump float;\n" +
+                "uniform vec4 uColor; out vec4 fragColor;\n" +
+                "void main(){ fragColor = uColor; }\n";
 
         BenchRenderer(GpuBenchActivity activity) {
             this.activity = activity;
@@ -199,6 +242,13 @@ public final class GpuBenchActivity extends Activity {
             GLES30.glEnable(GLES30.GL_CULL_FACE);
             GLES30.glCullFace(GLES30.GL_BACK);
             program = linkProgram(VERTEX_SHADER, FRAGMENT_SHADER);
+            overlayProgram = linkProgram(OVERLAY_VERTEX, OVERLAY_FRAGMENT);
+            overlayScaleLocation = GLES30.glGetUniformLocation(overlayProgram, "uScale");
+            overlayOffsetLocation = GLES30.glGetUniformLocation(overlayProgram, "uOffset");
+            overlayColorLocation = GLES30.glGetUniformLocation(overlayProgram, "uColor");
+            int[] overlayBuffers = new int[1];
+            GLES30.glGenBuffers(1, overlayBuffers, 0);
+            overlayBuffer = overlayBuffers[0];
             viewProjectionLocation = GLES30.glGetUniformLocation(program, "uViewProj");
             timeLocation = GLES30.glGetUniformLocation(program, "uTime");
             qualityLocation = GLES30.glGetUniformLocation(program, "uQuality");
@@ -293,6 +343,7 @@ public final class GpuBenchActivity extends Activity {
             long elapsed = now - statsStartNs;
             if (elapsed >= 1_000_000_000L && frames > 0) {
                 double fps = frames * 1_000_000_000.0 / elapsed;
+                displayedFps = fps;
                 double avgMs = frameMsTotal / frames;
                 double onDrawCpuAvgMs = cpuSamples == 0 ? Double.NaN : onDrawCpuMsTotal / cpuSamples;
                 double drawSubmitCpuAvgMs = cpuSamples == 0 ? Double.NaN : drawSubmitCpuMsTotal / cpuSamples;
@@ -331,6 +382,94 @@ public final class GpuBenchActivity extends Activity {
                 cpuSamples = 0;
                 gpuMsTotal = 0;
                 gpuSamples = 0;
+            }
+            drawFpsOverlay();
+        }
+
+        private void drawFpsOverlay() {
+            if (overlayProgram == 0 || width <= 0 || height <= 0) {
+                return;
+            }
+            int fps = (int) Math.max(0, Math.min(999, Math.round(displayedFps)));
+            int hundreds = fps / 100;
+            int tens = (fps / 10) % 10;
+            int ones = fps % 10;
+            java.util.ArrayList<Float> vertices = new java.util.ArrayList<>();
+            float digitWidth = 0.16f;
+            float gap = 0.03f;
+            float startX = -0.92f;
+            if (hundreds > 0) {
+                appendDigit(vertices, hundreds, startX);
+                appendDigit(vertices, tens, startX + digitWidth + gap);
+                appendDigit(vertices, ones, startX + (digitWidth + gap) * 2f);
+            } else {
+                appendDigit(vertices, tens, startX);
+                appendDigit(vertices, ones, startX + digitWidth + gap);
+            }
+            if (vertices.isEmpty()) {
+                return;
+            }
+            float[] data = new float[vertices.size()];
+            for (int i = 0; i < data.length; i++) {
+                data[i] = vertices.get(i);
+            }
+            FloatBuffer buffer = ByteBuffer.allocateDirect(data.length * 4)
+                    .order(ByteOrder.nativeOrder()).asFloatBuffer();
+            buffer.put(data).position(0);
+            GLES30.glDisable(GLES30.GL_DEPTH_TEST);
+            GLES30.glUseProgram(overlayProgram);
+            GLES30.glUniform2f(overlayScaleLocation, 1f, 1f);
+            GLES30.glUniform2f(overlayOffsetLocation, 0f, 0f);
+            float green = fps >= 59 ? 1f : fps >= 30 ? 0.82f : 0.25f;
+            float red = fps >= 59 ? 0.25f : fps >= 30 ? 1f : 1f;
+            GLES30.glUniform4f(overlayColorLocation, red, green, 0.35f, 1f);
+            GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, overlayBuffer);
+            GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, data.length * 4, buffer, GLES30.GL_STREAM_DRAW);
+            GLES30.glEnableVertexAttribArray(0);
+            GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 8, 0);
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, data.length / 2);
+            GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, cubeBuffer);
+            GLES30.glVertexAttribPointer(0, 3, GLES30.GL_FLOAT, false, 24, 0);
+            GLES30.glEnableVertexAttribArray(0);
+            GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, instanceBuffer);
+            GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, 0);
+            GLES30.glEnable(GLES30.GL_DEPTH_TEST);
+        }
+
+        private void appendDigit(java.util.ArrayList<Float> vertices, int digit, float originX) {
+            int mask = DIGIT_MASKS[digit];
+            float[][] segments = {
+                    {0.18f, 1.42f, 0.82f, 1.56f},
+                    {0.78f, 0.82f, 0.94f, 1.40f},
+                    {0.78f, 0.16f, 0.94f, 0.74f},
+                    {0.18f, 0.02f, 0.82f, 0.16f},
+                    {0.04f, 0.16f, 0.20f, 0.74f},
+                    {0.04f, 0.82f, 0.20f, 1.40f},
+                    {0.18f, 0.72f, 0.82f, 0.86f}
+            };
+            float scaleX = 0.16f;
+            float scaleY = 0.18f;
+            float originY = 0.62f;
+            for (int segment = 0; segment < segments.length; segment++) {
+                if ((mask & (1 << segment)) == 0) {
+                    continue;
+                }
+                float left = originX + segments[segment][0] * scaleX;
+                float bottom = originY + segments[segment][1] * scaleY;
+                float right = originX + segments[segment][2] * scaleX;
+                float top = originY + segments[segment][3] * scaleY;
+                addQuad(vertices, left, bottom, right, top);
+            }
+        }
+
+        private void addQuad(java.util.ArrayList<Float> vertices, float left, float bottom,
+                             float right, float top) {
+            float[] quad = {
+                    left, bottom, right, bottom, right, top,
+                    left, bottom, right, top, left, top
+            };
+            for (float value : quad) {
+                vertices.add(value);
             }
         }
 

@@ -1,9 +1,19 @@
+cc_library_shared {
+    name: "libkikigpubench_buffer_probe",
+    srcs: ["jni/BufferCountProbe.cpp"],
+    shared_libs: ["libandroid", "libnativewindow"],
+    header_libs: ["jni_headers", "libnativewindow_headers"],
+    cflags: ["-Wall", "-Werror"],
+}
+
 android_app {
     name: "KikiGpuBench",
     manifest: "AndroidManifest.xml",
     srcs: ["src/**/*.java"],
-    sdk_version: "current",
+    platform_apis: true,
     min_sdk_version: "29",
     target_sdk_version: "35",
     certificate: "platform",
+    jni_libs: ["libkikigpubench_buffer_probe"],
+    use_embedded_native_libs: true,
 }

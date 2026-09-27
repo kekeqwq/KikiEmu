@@ -28,6 +28,8 @@
 !/tools/qemu-virgl-fence-events.txt
 !/tools/capture_qemu_window.ps1
 !/tools/measure_kikiaosp_global_fps.ps1
+!/tools/measure_gpu_bench_present.ps1
+!/tools/measure_gpu_bench_waits.ps1
 !/tools/probe_wgl_adreno.c
 !/tools/gpu-bench/
 !/tools/gpu-bench/**

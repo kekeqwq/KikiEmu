@@ -10,6 +10,7 @@ param(
   [ValidateSet('Client', 'Guest')][string]$HwcMode = 'Client',
   [ValidateSet('skiaglthreaded', 'skiagl')][string]$RenderEngineBackend = 'skiaglthreaded',
   [ValidateSet('gtk', 'sdl')][string]$DisplayBackend = 'gtk',
+  [switch]$AngleEgl,
   [switch]$GpuBlob,
   [ValidateRange(1, 16)][int]$VcpuCount = 4,
   [ValidateRange(0, 8)][int]$KernelLogLevel = 8,
@@ -38,6 +39,9 @@ if ($GpuBlob -and $GpuMode -ne 'Virgl') {
 }
 if ($TraceVirglFences -and $GpuMode -ne 'Virgl') {
   throw '-TraceVirglFences requires -GpuMode Virgl'
+}
+if ($AngleEgl -and ($GpuMode -ne 'Virgl' -or $DisplayBackend -ne 'gtk')) {
+  throw '-AngleEgl requires -GpuMode Virgl and -DisplayBackend gtk'
 }
 if ($HwcMode -eq 'Guest' -and $GpuMode -ne 'Virgl') {
   throw '-HwcMode Guest requires -GpuMode Virgl'
@@ -112,7 +116,7 @@ foreach ($partition in $partitions) {
 }
 $logcatQemuPath = $logcat.Replace('\','/')
 $gpuResolution = if ($NativeResolution) { "xres=$PortraitWidthPixels,yres=$PortraitHeightPixels" } else { 'xres=1080,yres=2400' }
-$glOption = if ($GpuMode -eq 'Virgl') { 'on' } else { 'off' }
+$glOption = if ($AngleEgl) { 'es' } elseif ($GpuMode -eq 'Virgl') { 'on' } else { 'off' }
 $gpuDevice = if ($GpuMode -eq 'Virgl') { 'virtio-gpu-gl-pci' } else { 'virtio-gpu-pci' }
 $gpuBlobOption = if ($GpuBlob) { ',blob=on' } else { '' }
 $gpuDeviceOptions = "$gpuDevice,hostmem=256M,$gpuResolution$gpuBlobOption"
@@ -168,6 +172,12 @@ $start = [System.Diagnostics.ProcessStartInfo]::new($qemu)
 $start.UseShellExecute = $false
 $start.CreateNoWindow = $true
 $start.Environment['KIKI_GTK_TOUCH_FIRST'] = '1'
+if ($AngleEgl) {
+  $start.Environment['KIKI_GTK_ANGLE_EGL'] = '1'
+  $angleContextLog = Join-Path $images "qemu-kikiaosp-$Tag.angle-context.log"
+  if (Test-Path -LiteralPath $angleContextLog) { throw "Refusing to overwrite $angleContextLog" }
+  $start.Environment['KIKI_ANGLE_CTX_LOG'] = $angleContextLog
+}
 if (Test-Path -LiteralPath $Msys2Bin -PathType Container) {
   # The native CLANGARM64 build resolves GTK/GLib runtime DLLs from MSYS2.
   $start.Environment['PATH'] = "$Msys2Bin;$($start.Environment['PATH'])"
@@ -211,4 +221,4 @@ $helperArguments = "-NoProfile -File `"$displayHelperPath`" -Serial 127.0.0.1:55
 $displayProcess = Start-Process -FilePath $pwshPath -ArgumentList $helperArguments `
   -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru
 $keyboardDevice = if ($VirtioKeyboard) { 'virtio-keyboard-pci' } else { 'none' }
-"QEMU_PID=$($process.Id) DISPLAY_HELPER_PID=$($displayProcess.Id) DISPLAY_BACKEND=$DisplayBackend DISPLAY_LOG=$displayLog SERIAL=$serial LOGCAT=$logcat QEMU_TRACE=$($TraceVirglFences ? $qemuTrace : 'off') GLOBAL_FPS_LOG=$($GlobalFpsProfile ? $globalFpsLog : 'off') GPU_MODE=$GpuMode HWC_MODE=$HwcMode RENDERENGINE_BACKEND=$RenderEngineBackend GPU_BLOB=$GpuBlob VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"
+"QEMU_PID=$($process.Id) DISPLAY_HELPER_PID=$($displayProcess.Id) DISPLAY_BACKEND=$DisplayBackend ANGLE_EGL=$AngleEgl DISPLAY_LOG=$displayLog SERIAL=$serial LOGCAT=$logcat QEMU_TRACE=$($TraceVirglFences ? $qemuTrace : 'off') GLOBAL_FPS_LOG=$($GlobalFpsProfile ? $globalFpsLog : 'off') GPU_MODE=$GpuMode HWC_MODE=$HwcMode RENDERENGINE_BACKEND=$RenderEngineBackend GPU_BLOB=$GpuBlob VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"
