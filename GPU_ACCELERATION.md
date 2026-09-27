@@ -124,3 +124,16 @@ Each mode was measured over the last 20 one-second Extreme (32,768 instances) lo
 | Client | 15.91 (13.46–17.79) | 58.36 ms | 2.00 ms | 4.81 ms |
 
 The distributions overlap substantially; a 0.52 FPS median difference is not a repeatable win, and other stages move in opposite directions. No HWC-mode performance claim is justified. Keep Client as the default for now. Host screenshots show both scenes visibly rendering at the same exact guest size: Guest `C:\Users\keke\Downloads\temp\qemu-desktop-fixed-864x1728-hwc-guest-compare-20260927.png`, Client `C:\Users\keke\Downloads\temp\qemu-desktop-fixed-864x1728-hwc-client-paired-20260927.png`. Both guests ran with `-snapshot`; these tests did not alter the saved system/vendor images or base userdata.
+
+### SurfaceFlinger framebuffer-buffer A/B at the 864x1728 floor
+
+To test a real pipeline change without changing resolution, an experimental system image set `ro.surface_flinger.max_frame_buffer_acquired_buffers=3`; the untouched baseline leaves it unset and uses the default of 2. AOSP documents this read-only property as controlling the buffers allocated for `FramebufferSurface`; the consumer's acquired-buffer limit is set to one less than that value ([property definition](https://android.googlesource.com/platform/frameworks/native/+/refs/heads/android17-release/services/surfaceflinger/sysprop/SurfaceFlingerProperties.sysprop), [FramebufferSurface implementation](https://android.googlesource.com/platform/frameworks/native/+/refs/heads/android17-release/services/surfaceflinger/DisplayHardware/FramebufferSurface.cpp)). At runtime, the candidate reported `NUM_FRAMEBUFFER_SURFACE_BUFFERS=3` and `mMaxAcquiredBufferCount=2`; the baseline reported 2 and 1 respectively.
+
+The paired tests used the same 7.3-rc4 kernel, VirGL vendor image, 8 vCPUs, 4 GiB guest RAM, GTK/WGL, blob enabled, Client HWC, Extreme 32,768-instance scene, and the exact **864x1728** guest mode. Each value is the last 20 one-second windows after startup, with no tracing enabled:
+
+| Framebuffer buffers | Median FPS (range) | Median `CLEAR_MS` | Median GPU draw |
+| --- | ---: | ---: | ---: |
+| 3 (experimental) | 15.30 (11.83–17.18) | 61.37 ms | 5.06 ms |
+| 2 (immediate baseline) | 15.18 (11.42–17.18) | 60.66 ms | 5.57 ms |
+
+The 0.13 FPS difference is within run-to-run noise; the ranges overlap completely, and the candidate did not shorten the frame wait. The product-property experiment is therefore reverted and the default two-buffer setup retained. Candidate system image SHA-256: `d633e651de033e2e29e883384b8e0fbba95251f739d89e42171b9d81d3cfe653`. Both QEMU runs used `-snapshot`. The active test instance is restored to the unchanged two-buffer baseline at 864x1728. No resolution, viewport, or render-scale reduction was used; this experiment did not improve the roughly 15 FPS result.
