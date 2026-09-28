@@ -2,11 +2,13 @@
 
 ## Configuration
 
-The `kikiaosp_test` device overlay sets Android's `config_defaultRefreshRate` and
-`config_defaultPeakRefreshRate` to 120. The separate Settings overlay enables
-the built-in `config_show_smooth_display` control. This leaves Android's
-adaptive refresh policy intact while allowing its peak to reach the Surface's
-120-Hz panel capability. No AOSP upstream source file is edited.
+The `kikiaosp_test` device overlay sets Android's `config_defaultRefreshRate` to
+60 and `config_defaultPeakRefreshRate` to 120. The separate Settings overlay
+enables the built-in `config_show_smooth_display` control. This keeps a 60-Hz
+baseline while allowing Android's adaptive policy and the Smooth Display
+preference to use the Surface's 120-Hz capability when requested. The guest
+mode is not removed or capped at 60; the device can switch to 120. No AOSP
+upstream source file is edited.
 
 The local GTK QEMU patch `patches/qemu-gtk-guest-refresh-rate.patch` adds the
 `KIKI_GTK_GUEST_REFRESH_RATE_HZ` override (30–120 Hz). It uses the same chosen
@@ -46,7 +48,7 @@ applies the high-refresh patch. For a local GTK run, set `-GuestRefreshRateHz
 launcher prints the selected guest refresh rate and passes it to QEMU's GTK
 process environment.
 
-## 2026-09-28 validation
+## Initial fixed-120 policy validation — 2026-09-28
 
 - `framework-res.apk`: default and peak refresh values both 120.
 - `Settings.apk`: `config_show_smooth_display=true`; the Display page visibly
@@ -75,7 +77,49 @@ performance and host physical-panel telemetry remain separate questions.
 Logs and image are retained in `bundles/gpu-virgl-native-20260927/` under the
 `high-refresh-20260928` tag.
 
-## Windows host output check
+## Adaptive default/peak policy update — 2026-09-28
+
+The performance investigation showed that forcing the baseline to 120 increased
+missed-frame and jank proxies in the tested ADB-driven workloads. This did not
+prove a physical touch-to-photon regression, and it is not a reason to drop
+120-Hz support. The device-tree policy was therefore changed on branch
+`feature/gpu-virgl-20260927` (commit `7b3803a`) to the adaptive 60-Hz baseline /
+120-Hz peak while leaving Smooth Display enabled.
+
+- Built `systemimage` incrementally on 192.168.2.185 with `m -j8 systemimage`;
+  Soong completed successfully in 13m52s. The resulting image SHA-256 is
+  `b1e4f1b481419f49742eb070f5829097b100d2ba42a8bf46e69537e698b64d3f` and is
+  retained as `bundles/gpu-virgl-native-20260927/system-adaptive-60hz-peak120-20260928.img`.
+- `aapt2 dump resources` verified the packaged framework values are
+  `config_defaultRefreshRate=60` and `config_defaultPeakRefreshRate=120`;
+  `Settings.apk` contains `config_show_smooth_display=true`. The Settings
+  controller checks the highest display mode and falls back to the framework
+  peak value, so with a 120-Hz reported mode the built-in switch is available
+  and defaults checked.
+- Booted the new image with the fencefix kernel, matching HWC vendor, native
+  GTK/WGL + VirGL/blob, Client HWC, 8 vCPUs, 4 GiB, 864×1728, and QEMU guest
+  refresh override 120. Android reached `sys.boot_completed=1`; SurfaceFlinger
+  stayed running. `dumpsys display` reported supported rates including
+  `120.00001`, with the normal active render rate at `60.000004`.
+- In the disposable `-snapshot` guest, setting both `min_refresh_rate` and
+  `peak_refresh_rate` to 120 changed `mActiveRenderFrameRate` to
+  `120.00001`; deleting those temporary settings restored 60 while the 120-Hz
+  supported mode and 120-Hz peak remained. The Settings Display activity was
+  launched; the snapshot was then discarded.
+- An initial run accidentally enabled the optional `-AngleEgl` host path and
+  caused `GrGLMakeNativeInterface() failed` / SurfaceFlinger restarts. Both the
+  prior-system control and adaptive-image run succeeded using the archived
+  native GTK/WGL path without `-AngleEgl`; do not add that flag to this profile.
+- The Windows host refresh mode was not changed for this run. This validates
+  Android/QEMU guest 120-Hz mode selection, not an independent physical-panel
+  scanout measurement. The host-side 120-Hz PresentMon experiment below remains
+  separate evidence.
+
+Logs are retained under the `adaptive-60-peak120-*` tags in
+`bundles/gpu-virgl-native-20260927/`. The test QEMU process was stopped, its
+`-snapshot` writes were discarded, and ports 4447/5555 were released.
+
+## Windows host output check (initial fixed-120 build)
 
 The Surface driver exposes 2880×1920 modes at 30, 48, 60, 75, 100, and 120 Hz.
 At the start of this check Windows was using 60 Hz. A non-persistent
