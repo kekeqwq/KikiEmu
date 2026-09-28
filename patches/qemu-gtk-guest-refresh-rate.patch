@@ -1,0 +1,51 @@
+diff --git a/ui/gtk.c b/ui/gtk.c
+index 46cbab2..0000000 100644
+--- a/ui/gtk.c
++++ b/ui/gtk.c
+@@ -826,20 +826,43 @@ void gd_update_monitor_refresh_rate(VirtualConsole *vc, GtkWidget *widget)
+ #ifdef GDK_VERSION_3_22
+     GdkWindow *win = gtk_widget_get_window(widget);
++    const char *guest_refresh_rate_env;
++    char *guest_refresh_rate_end;
+     int refresh_rate;
++    int guest_refresh_rate;
+ 
+     if (win) {
+         GdkDisplay *dpy = gtk_widget_get_display(widget);
+         GdkMonitor *monitor = gdk_display_get_monitor_at_window(dpy, win);
+         refresh_rate = gdk_monitor_get_refresh_rate(monitor); /* [mHz] */
+     } else {
+         refresh_rate = 0;
+     }
+ 
+-    gd_set_ui_refresh_rate(vc, refresh_rate);
++    /*
++     * GTK exposes the current Windows desktop cadence, which can be lower
++     * than a dynamic-refresh panel's peak. Allow the Surface launcher to
++     * configure the guest's virtual-display peak explicitly. Drive both the
++     * guest mode and QEMU's scanout polling from the same value so reporting
++     * 120 Hz does not leave the virtual display update loop capped at 60 Hz.
++     */
++    guest_refresh_rate = refresh_rate;
++    guest_refresh_rate_env =
++        g_getenv("KIKI_GTK_GUEST_REFRESH_RATE_HZ");
++    if (guest_refresh_rate_env && *guest_refresh_rate_env) {
++        gint64 guest_refresh_rate_hz =
++            g_ascii_strtoll(guest_refresh_rate_env,
++                            &guest_refresh_rate_end, 10);
++        if (guest_refresh_rate_end != guest_refresh_rate_env &&
++            !*guest_refresh_rate_end && guest_refresh_rate_hz >= 30 &&
++            guest_refresh_rate_hz <= 120) {
++            guest_refresh_rate = guest_refresh_rate_hz * 1000;
++        }
++    }
++    gd_set_ui_refresh_rate(vc, guest_refresh_rate);
+ 
+     /* T = 1 / f = 1 [s*Hz] / f = 1000*1000 [ms*mHz] / f */
+-    vc->gfx.dcl.update_interval = refresh_rate ?
+-        MIN(1000 * 1000 / refresh_rate, GUI_REFRESH_INTERVAL_DEFAULT) :
++    vc->gfx.dcl.update_interval = guest_refresh_rate ?
++        MIN(1000 * 1000 / guest_refresh_rate, GUI_REFRESH_INTERVAL_DEFAULT) :
+         GUI_REFRESH_INTERVAL_DEFAULT;
+ #endif
+ }

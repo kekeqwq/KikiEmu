@@ -10,6 +10,7 @@ param(
   [ValidateSet('Client', 'Guest')][string]$HwcMode = 'Client',
   [ValidateSet('skiaglthreaded', 'skiagl')][string]$RenderEngineBackend = 'skiaglthreaded',
   [ValidateSet('gtk', 'sdl')][string]$DisplayBackend = 'gtk',
+  [ValidateRange(30, 120)][int]$GuestRefreshRateHz = 120,
   [switch]$AngleEgl,
   [switch]$GpuBlob,
   [ValidateRange(1, 16)][int]$VcpuCount = 4,
@@ -172,6 +173,9 @@ $start = [System.Diagnostics.ProcessStartInfo]::new($qemu)
 $start.UseShellExecute = $false
 $start.CreateNoWindow = $true
 $start.Environment['KIKI_GTK_TOUCH_FIRST'] = '1'
+if ($DisplayBackend -eq 'gtk') {
+  $start.Environment['KIKI_GTK_GUEST_REFRESH_RATE_HZ'] = [string]$GuestRefreshRateHz
+}
 if ($AngleEgl) {
   $start.Environment['KIKI_GTK_ANGLE_EGL'] = '1'
   $angleContextLog = Join-Path $images "qemu-kikiaosp-$Tag.angle-context.log"
@@ -221,4 +225,4 @@ $helperArguments = "-NoProfile -File `"$displayHelperPath`" -Serial 127.0.0.1:55
 $displayProcess = Start-Process -FilePath $pwshPath -ArgumentList $helperArguments `
   -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru
 $keyboardDevice = if ($VirtioKeyboard) { 'virtio-keyboard-pci' } else { 'none' }
-"QEMU_PID=$($process.Id) DISPLAY_HELPER_PID=$($displayProcess.Id) DISPLAY_BACKEND=$DisplayBackend ANGLE_EGL=$AngleEgl DISPLAY_LOG=$displayLog SERIAL=$serial LOGCAT=$logcat QEMU_TRACE=$($TraceVirglFences ? $qemuTrace : 'off') GLOBAL_FPS_LOG=$($GlobalFpsProfile ? $globalFpsLog : 'off') GPU_MODE=$GpuMode HWC_MODE=$HwcMode RENDERENGINE_BACKEND=$RenderEngineBackend GPU_BLOB=$GpuBlob VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"
+"QEMU_PID=$($process.Id) DISPLAY_HELPER_PID=$($displayProcess.Id) DISPLAY_BACKEND=$DisplayBackend ANGLE_EGL=$AngleEgl DISPLAY_LOG=$displayLog SERIAL=$serial LOGCAT=$logcat QEMU_TRACE=$($TraceVirglFences ? $qemuTrace : 'off') GLOBAL_FPS_LOG=$($GlobalFpsProfile ? $globalFpsLog : 'off') GPU_MODE=$GpuMode HWC_MODE=$HwcMode RENDERENGINE_BACKEND=$RenderEngineBackend GPU_BLOB=$GpuBlob GUEST_REFRESH_RATE_HZ=$($DisplayBackend -eq 'gtk' ? $GuestRefreshRateHz : 'host-default') VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"

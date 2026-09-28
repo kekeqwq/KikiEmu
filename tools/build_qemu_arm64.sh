@@ -38,6 +38,8 @@ git -C "$source_dir" apply --check "$repo_root/patches/qemu-gtk-native-resize-to
 git -C "$source_dir" apply "$repo_root/patches/qemu-gtk-native-resize-touch-focus.patch"
 git -C "$source_dir" apply --check "$repo_root/patches/qemu-gtk-global-fps-profile.patch"
 git -C "$source_dir" apply "$repo_root/patches/qemu-gtk-global-fps-profile.patch"
+git -C "$source_dir" apply --check "$repo_root/patches/qemu-gtk-guest-refresh-rate.patch"
+git -C "$source_dir" apply "$repo_root/patches/qemu-gtk-guest-refresh-rate.patch"
 
 mkdir -p "$source_dir/build"
 (
