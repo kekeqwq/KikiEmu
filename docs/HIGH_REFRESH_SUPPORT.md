@@ -74,3 +74,31 @@ performance and host physical-panel telemetry remain separate questions.
 
 Logs and image are retained in `bundles/gpu-virgl-native-20260927/` under the
 `high-refresh-20260928` tag.
+
+## Windows host output check
+
+The Surface driver exposes 2880×1920 modes at 30, 48, 60, 75, 100, and 120 Hz.
+At the start of this check Windows was using 60 Hz. A non-persistent
+`ChangeDisplaySettingsEx` test selected 2880×1920@120 Hz successfully; the
+selection was verified while active and restored to the original 60-Hz mode in
+a `finally` block. The emulator launcher does not change the host's global
+refresh setting. To exercise the physical high-refresh path, Windows must
+currently select 120 Hz (or its Dynamic option); Android's 120-Hz guest mode
+cannot force the host desktop to change its mode.
+
+While the host was temporarily at 120 Hz, PresentMon captured 1,675 frames from
+the QEMU process, all `DXGI / Composed: Flip`. `DisplayedTime` included 155
+samples around 8.3 ms, consistent with frames entering a 120-Hz presentation
+cadence; its median was 16.67 ms and long-tail P95/P99 were 41.67/58.34 ms, so
+this is not evidence of stable 120-fps rendering. In the same 35-second ADB
+navigation workload, QEMU GTK callbacks averaged 42.73 fps (median active
+five-second window 46.11 fps), and SurfaceFlinger added 1,392 GPU-classified
+misses, zero HWC-classified misses. Launcher3/Settings/SystemUI reported
+33.36%/35.28%/29.87% janky frames. PresentMon's input-to-photon columns were
+`NA` because the workload used ADB, not physical touch.
+
+This confirms the Windows/QEMU composed-present path can use the selected
+120-Hz desktop mode, but does not show a performance fix or independently
+measure panel scanout with an external sensor. The host was restored to 60 Hz;
+the QEMU `-snapshot` test instance was closed. Capture:
+`C:\Users\keke\Downloads\temp\presentmon-kikiaosp-120hz-host-output-20260928.csv`.
