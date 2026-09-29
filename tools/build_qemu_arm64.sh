@@ -9,9 +9,14 @@ fi
 # A machine with several MSYS2 environments can leak UCRT64 pkg-config paths
 # into CLANGARM64. Pin dependency discovery to this native ARM64 prefix so
 # Meson never combines an x86_64 GLib config with the AArch64 compiler.
+# Meson's native Python launches Windows pkg-config directly, so give it a
+# Windows-form path rather than an MSYS path that becomes an unparseable C:/….
 mingw_prefix=${MINGW_PREFIX:-/clangarm64}
-export PKG_CONFIG_LIBDIR="$mingw_prefix/lib/pkgconfig"
+pkgconfig_libdir=$(cygpath -w "$mingw_prefix/lib/pkgconfig")
+pkgconfig_sysroot=$(cygpath -w /)
+export PKG_CONFIG_LIBDIR="$pkgconfig_libdir"
 export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
+export PKG_CONFIG_SYSROOT_DIR="$pkgconfig_sysroot"
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source_dir=${1:-"$repo_root/tools/qemu-src"}
