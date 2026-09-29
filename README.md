@@ -66,7 +66,7 @@ pacman -S --needed git make ninja python pkgconf \
 ./tools/build_qemu_arm64.sh
 ```
 
-脚本从上游 QEMU 检出固定提交，应用 Windows ARM 触摸/重绘与 WGL 兼容补丁，再应用原生像素动态分辨率、缩放反馈修正、触摸优先输入和可选全局 GL 帧探针，构建 `aarch64-softmmu` 的 GTK/WHPX 版本。脚本遇到已有脏 QEMU 源码会拒绝覆盖；可传另一个空目录作参数。本机已验证构建在 `tools/qemu-src/build/qemu-system-aarch64.exe`；GPU 实验版通过 `-QemuPath` 指向对应的独立 QEMU 产物。运行时脚本会把 `C:\msys64\clangarm64\bin` 加入该进程的 DLL 搜索路径。单独复制 EXE 不等于可移植安装包，还需要匹配的 MSYS2 运行库。
+脚本从上游 QEMU 检出固定提交，应用 Windows ARM 触摸/重绘与 WGL 兼容补丁，再应用原生像素动态分辨率、缩放反馈修正、触摸优先输入和可选全局 GL 帧探针，构建 `aarch64-softmmu` 的 GTK/WHPX 版本。它会将 `pkg-config` 依赖搜索锁定在 CLANGARM64 前缀，避免同机 UCRT64/x86_64 GLib 混入 ARM64 构建。脚本遇到已有脏 QEMU 源码会拒绝覆盖；可传另一个空目录作参数。本机已验证构建在 `tools/qemu-src/build/qemu-system-aarch64.exe`；GPU 实验版通过 `-QemuPath` 指向对应的独立 QEMU 产物。运行时脚本会把 `C:\msys64\clangarm64\bin` 加入该进程的 DLL 搜索路径。单独复制 EXE 不等于可移植安装包，还需要匹配的 MSYS2 运行库。
 
 在 Windows PowerShell 中检查已构建 EXE 的 PE Machine（ARM64 为 `0xAA64`）：
 

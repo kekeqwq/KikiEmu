@@ -6,6 +6,13 @@ if [[ ${MSYSTEM:-} != CLANGARM64 ]]; then
     exit 2
 fi
 
+# A machine with several MSYS2 environments can leak UCRT64 pkg-config paths
+# into CLANGARM64. Pin dependency discovery to this native ARM64 prefix so
+# Meson never combines an x86_64 GLib config with the AArch64 compiler.
+mingw_prefix=${MINGW_PREFIX:-/clangarm64}
+export PKG_CONFIG_LIBDIR="$mingw_prefix/lib/pkgconfig"
+export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
+
 repo_root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source_dir=${1:-"$repo_root/tools/qemu-src"}
 qemu_rev=5f664cd37aec17e8145aa117d8da68f507edc8f1
