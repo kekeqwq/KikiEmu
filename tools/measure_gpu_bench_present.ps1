@@ -1,10 +1,15 @@
 param(
   [ValidateRange(10, 120)][int]$DurationSeconds = 30,
   [ValidateRange(100, 800)][int]$PollIntervalMs = 300,
+  [ValidateSet('60 FPS target', 'Game load', 'Extreme 3D')][string]$Profile = 'Extreme 3D',
+  [ValidateRange(0, 5)][int]$BufferCount = 0,
   [string]$AdbSerial = '127.0.0.1:5555'
 )
 
 $ErrorActionPreference = 'Stop'
+if ($BufferCount -ne 0 -and $BufferCount -lt 3) {
+  throw 'The test APK supports only default buffering (0) or explicit buffer counts 3 through 5.'
+}
 
 function Invoke-Adb([string[]]$AdbArgs) {
   $result = @(& adb -s $AdbSerial @AdbArgs 2>&1)
@@ -56,18 +61,74 @@ $sizeMatch = [regex]::Match($deviceSize, 'Physical size:\s*(\d+)x(\d+)')
 if (-not $sizeMatch.Success) { throw "Cannot verify physical display size: $deviceSize" }
 $width = [int]$sizeMatch.Groups[1].Value
 $height = [int]$sizeMatch.Groups[2].Value
+$profileId = switch ($Profile) {
+  '60 FPS target' { 0 }
+  'Game load' { 1 }
+  'Extreme 3D' { 2 }
+}
+$profileInstances = switch ($Profile) {
+  '60 FPS target' { 1024 }
+  'Game load' { 8192 }
+  'Extreme 3D' { 32768 }
+}
 if ([Math]::Min($width, $height) -lt 864 -or [Math]::Max($width, $height) -lt 1728) {
   throw "Guest display is below the 864x1728 minimum: ${width}x${height}"
 }
 
-$qemuProcesses = @(Get-Process qemu-system-aarch64 -ErrorAction SilentlyContinue)
-if ($qemuProcesses.Count -ne 1 -or $qemuProcesses[0].MainWindowHandle -eq 0) {
-  throw 'Expected exactly one QEMU process with a desktop window.'
+$qemuPids = @(
+  Get-NetTCPConnection -State Listen -LocalPort 4447,5555 -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty OwningProcess -Unique
+)
+$qemuProcesses = @(
+  foreach ($pidValue in $qemuPids) {
+    Get-Process -Id $pidValue -ErrorAction SilentlyContinue
+  }
+)
+if ($qemuProcesses.Count -ne 1 -or
+    $qemuProcesses[0].ProcessName -notlike 'qemu-system-aarch64*' -or
+    $qemuProcesses[0].MainWindowHandle -eq 0) {
+  throw 'Expected exactly one QEMU process owning the Android/monitor ports with a desktop window.'
 }
 Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr hWnd);' -Name WindowProbe -Namespace Kiki
 $windowHandle = $qemuProcesses[0].MainWindowHandle
 if ([Kiki.WindowProbe]::IsIconic($windowHandle)) {
   throw 'QEMU is minimized; a normal foreground-performance sample would be invalid.'
+}
+
+$profileRequestStartMs = [long]((Invoke-Adb -AdbArgs @('shell', 'date +%s%3N')) -join '')
+$launchArgs = @(
+  'shell', 'am', 'start', '-S', '-W', '-n', 'com.kiki.gpubench/.GpuBenchActivity',
+  '--ei', 'profile', [string]$profileId
+)
+if ($BufferCount -gt 0) { $launchArgs += @('--ei', 'buffer_count', [string]$BufferCount) }
+$launchOutput = Invoke-Adb -AdbArgs $launchArgs
+Start-Sleep -Seconds 2
+$profileLog = @(Invoke-Adb -AdbArgs @('logcat', '-d', '-t', '300', '-v', 'epoch', '-s', 'KikiGpuBench:I'))
+$expectedProfile = [regex]::Escape("PROFILE=$Profile INSTANCES=$profileInstances")
+$profileConfirmed = @(
+  foreach ($line in $profileLog) {
+    $match = [regex]::Match($line, '^\s*(\d+\.\d+)\s+\d+\s+\d+\s+I KikiGpuBench:.*' + $expectedProfile)
+    if ($match.Success -and [long]([double]::Parse($match.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture) * 1000) -ge $profileRequestStartMs) {
+      $line
+    }
+  }
+)
+if (-not $profileConfirmed.Count) {
+  throw "The APK did not confirm PROFILE='$Profile' INSTANCES=$profileInstances after the explicit launch: $($launchOutput -join ' ')"
+}
+if ($BufferCount -gt 0) {
+  $expectedBufferRequest = [regex]::Escape("BUFFER_COUNT_REQUEST=$BufferCount RESULT=0")
+  $bufferConfirmed = @(
+    foreach ($line in $profileLog) {
+      $match = [regex]::Match($line, '^\s*(\d+\.\d+)\s+\d+\s+\d+\s+I KikiGpuBench:.*' + $expectedBufferRequest)
+      if ($match.Success -and [long]([double]::Parse($match.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture) * 1000) -ge $profileRequestStartMs) {
+        $line
+      }
+    }
+  )
+  if (-not $bufferConfirmed.Count) {
+    throw "The APK did not confirm successful buffer_count=$BufferCount after launch."
+  }
 }
 
 $benchPid = (Invoke-Adb -AdbArgs @('shell', 'pidof com.kiki.gpubench')) -join ''
@@ -87,7 +148,7 @@ $startEpochMs = [long]((Invoke-Adb -AdbArgs @('shell', 'date +%s%3N')) -join '')
 $timer = [Diagnostics.Stopwatch]::StartNew()
 $nextLayerCheck = 0.0
 
-Write-Output "PRESENT_SAMPLE_START guest=${width}x${height} seconds=$DurationSeconds pid=$benchPid layer=$layerName"
+Write-Output "PRESENT_SAMPLE_START profile='$Profile' instances=$profileInstances buffer_count=$BufferCount guest=${width}x${height} seconds=$DurationSeconds pid=$benchPid layer=$layerName"
 while ($timer.Elapsed.TotalSeconds -lt $DurationSeconds) {
   Start-Sleep -Milliseconds $PollIntervalMs
   if (-not (Get-Process -Id $qemuProcesses[0].Id -ErrorAction SilentlyContinue)) {
@@ -121,9 +182,10 @@ $intervalsMs = @(
   }
 )
 $logLines = @(Invoke-Adb -AdbArgs @('logcat', '-d', '-t', '600', '-v', 'epoch', '-s', 'KikiGpuBench:I'))
+$profilePattern = [regex]::Escape($Profile)
 $appFps = @(
   foreach ($line in $logLines) {
-    $match = [regex]::Match($line, '^\s*(\d+\.\d+)\s+(\d+)\s+\d+\s+I KikiGpuBench:\s+FPS=([\d.]+).*PROFILE=Extreme 3D INSTANCES=32768 RES=(\d+)x(\d+)')
+    $match = [regex]::Match($line, '^\s*(\d+\.\d+)\s+(\d+)\s+\d+\s+I KikiGpuBench:\s+FPS=([\d.]+).*PROFILE=' + $profilePattern + ' INSTANCES=' + $profileInstances + ' RES=(\d+)x(\d+)')
     if (-not $match.Success -or $match.Groups[2].Value -ne $benchPid) { continue }
     $epochMs = [long]([double]::Parse($match.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture) * 1000)
     if ($epochMs -lt ($startEpochMs + 1000) -or $epochMs -gt $endEpochMs) { continue }
@@ -132,14 +194,18 @@ $appFps = @(
   }
 )
 
-if ($presentTimes.Count -lt 2 -or $appFps.Count -lt 3) {
+if ($presentTimes.Count -lt 2) {
   throw "Insufficient steady data: present=$($presentTimes.Count), appFpsWindows=$($appFps.Count)."
 }
 $actualDurationSeconds = ($endEpochMs - $startEpochMs) / 1000.0
 $presentFps = $presentTimes.Count / $actualDurationSeconds
 $missedRefreshGaps = @($intervalsMs | Where-Object { $_ -gt 25.0 }).Count
+$callbackLogIncomplete = $appFps.Count -lt [Math]::Max(3, [int][Math]::Floor($actualDurationSeconds - 3.0))
 [pscustomobject]@{
   GuestSize = "${width}x${height}"
+  Profile = $Profile
+  Instances = $profileInstances
+  BufferCount = $BufferCount
   Seconds = [Math]::Round($actualDurationSeconds, 2)
   PresentedFrames = $presentTimes.Count
   PresentedFps = [Math]::Round($presentFps, 2)
@@ -147,6 +213,7 @@ $missedRefreshGaps = @($intervalsMs | Where-Object { $_ -gt 25.0 }).Count
   PresentIntervalP95Ms = [Math]::Round((Get-Percentile $intervalsMs 0.95), 2)
   PresentGapsOver25Ms = $missedRefreshGaps
   CallbackFpsWindows = $appFps.Count
+  CallbackLogIncomplete = $callbackLogIncomplete
   CallbackFpsMedian = [Math]::Round((Get-Percentile $appFps 0.50), 2)
   CallbackFpsMin = [Math]::Round((Get-Percentile $appFps 0.00), 2)
   CallbackFpsMax = [Math]::Round((Get-Percentile $appFps 1.00), 2)

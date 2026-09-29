@@ -65,6 +65,12 @@ public final class GpuBenchActivity extends Activity {
         surface.setEGLContextClientVersion(3);
         surface.setEGLConfigChooser(8, 8, 8, 0, 24, 0);
         renderer = new BenchRenderer(this);
+        int requestedProfile = getIntent().getIntExtra("profile", BenchRenderer.PROFILE_STRESS);
+        if (requestedProfile < BenchRenderer.PROFILE_TARGET
+                || requestedProfile > BenchRenderer.PROFILE_STRESS) {
+            requestedProfile = BenchRenderer.PROFILE_STRESS;
+        }
+        renderer.selectProfile(requestedProfile);
         surface.setRenderer(renderer);
         surface.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
         root.addView(surface, new FrameLayout.LayoutParams(

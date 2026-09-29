@@ -65,6 +65,12 @@ try {
   Receive-Asset $KernelHost "$KernelRepo/$($profile.kernel.source)" $profile.kernel
   Receive-Asset $AospHost "$AospRoot/$($profile.system.source)" $profile.system
   Receive-Asset $AospHost "$AospRoot/$($profile.vendor.source)" $profile.vendor
+  if ($null -ne $profile.product) {
+    Receive-Asset $AospHost "$AospRoot/$($profile.product.source)" $profile.product
+  }
+  if ($null -ne $profile.systemExt) {
+    Receive-Asset $AospHost "$AospRoot/$($profile.systemExt.source)" $profile.systemExt
+  }
 
   $archivePath = Join-Path $outputFull $profile.supportArchive.name
   if ($LocalSupportArchive) {

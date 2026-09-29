@@ -27,9 +27,11 @@ public static class KikiDesktopQemuCapture {
 '@
 }
 
-$qemu = Get-Process qemu-system-aarch64 -ErrorAction Stop |
+$qemu = Get-Process -ErrorAction SilentlyContinue |
+  Where-Object ProcessName -Like 'qemu-system-aarch64*' |
   Sort-Object StartTime -Descending |
   Select-Object -First 1
+if (-not $qemu) { throw 'No qemu-system-aarch64* process is running' }
 $qemuPid = [uint32]$qemu.Id
 $script:qemuGtkWindow = [IntPtr]::Zero
 $callback = [KikiDesktopQemuCapture+EnumProc]{ param($hwnd,$extra)

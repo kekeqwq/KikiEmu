@@ -40,6 +40,10 @@ git -C "$source_dir" apply --check "$repo_root/patches/qemu-gtk-global-fps-profi
 git -C "$source_dir" apply "$repo_root/patches/qemu-gtk-global-fps-profile.patch"
 git -C "$source_dir" apply --check "$repo_root/patches/qemu-gtk-guest-refresh-rate.patch"
 git -C "$source_dir" apply "$repo_root/patches/qemu-gtk-guest-refresh-rate.patch"
+git -C "$source_dir" apply --recount --check "$repo_root/patches/qemu-windows-gtk-resize-commit-on-release.patch"
+git -C "$source_dir" apply --recount "$repo_root/patches/qemu-windows-gtk-resize-commit-on-release.patch"
+git -C "$source_dir" apply --check "$repo_root/patches/qemu-sdl-ignore-host-key-repeat.patch"
+git -C "$source_dir" apply "$repo_root/patches/qemu-sdl-ignore-host-key-repeat.patch"
 
 mkdir -p "$source_dir/build"
 (

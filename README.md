@@ -97,7 +97,7 @@ adb shell getprop sys.boot_completed
 adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME
 ```
 
-脚本默认使用刚收集的 bundle、原生 ARM64 QEMU、WHPX、`virtio-gpu-pci`、`virtio-multitouch-pci` 和作为客机外设的 `virtio-keyboard-pci`。Windows QEMU 监控端口只监听 `127.0.0.1:4447`，ADB 转发端口为 `127.0.0.1:5555`。`-snapshot` 使测试不写回基础磁盘；串口、客机日志和显示初始化记录写入 bundle，每次自动加时间戳而不覆盖旧日志。启动器会在后台等 Android 启动完成，再配置满电虚拟电池与 AC 供电、关闭锁屏和屏保、保持唤醒并回到 Launcher 桌面；配置结果写入 `.display.log`。可用 `-BundleDir`、`-QemuPath` 等参数测试新配对；不要把别的 vendor 与此 profile 混用。
+脚本默认使用 SDL 窗口与 SDL 音频后端、原生 ARM64 QEMU、WHPX、`virtio-gpu-pci`、`virtio-multitouch-pci` 和作为客机外设的 `virtio-keyboard-pci`。当前 Surface 配置对应客机原生像素 `1003×1556`、Android 显示密度 `288 dpi` 与字体缩放 `1.5`；在宿主 200% 缩放下，SDL 初始客户区约为 `501×778`。Windows QEMU 监控端口只监听 `127.0.0.1:4447`，ADB 转发端口为 `127.0.0.1:5555`。`-snapshot` 使测试不写回基础磁盘；串口、客机日志和显示初始化记录写入 bundle，每次自动加时间戳而不覆盖旧日志。启动器会在后台等 Android 启动完成，再配置满电虚拟电池与 AC 供电、关闭锁屏和屏保、保持唤醒并回到 Launcher 桌面；配置结果写入 `.display.log`。可用 `-BundleDir`、`-QemuPath` 等参数测试新配对；不要把别的 vendor 与此 profile 混用。
 
 实际画面证据要截整张 Windows 桌面且保持 QEMU 普通窗口，不要最大化：
 
@@ -107,22 +107,30 @@ adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c 
 
 截图写入 `~/Downloads/temp/`，不上传仓库。测试完请关闭 QEMU 窗口，避免占用桌面和端口。
 
-主线默认启动包含真实像素动态分辨率、Ethernet 和扬声器。点按音与铃声试听依赖当前 dma-buf 内核，以及 `media.c2.hal.selection=aidl` 的 system 镜像。VirGL 已能经 Adreno 渲染，但帧率离日用目标仍有明显差距，高刷也未达标。关闭扬声器可传 `-SpeakerOutput:$false`，关闭动态分辨率可传 `-NativeResolution:$false`。
+主线包含真实像素动态分辨率、Ethernet、扬声器，以及可选的 Mesa VirGL 图形加速。VirGL 路径已在 Surface 的 Adreno 宿主上实际渲染 Android UI 和动态 3D 测试场景；它仍需配套 Mesa system/vendor 镜像并显式传 `-GpuMode Virgl`，旧的 network-audio 软件镜像仍保持兼容。点按音与铃声试听依赖 dma-buf 内核及 `media.c2.hal.selection=aidl`。关闭扬声器可传 `-SpeakerOutput:$false`，关闭动态分辨率可传 `-NativeResolution:$false`。
 
-GPU 加速实验记录见 [GPU_ACCELERATION.md](GPU_ACCELERATION.md)。功能分支增加了显式 `-GpuMode Virgl`、`-GpuBlob` 与 `-DryRun`。Mesa VirGL 已经在 Adreno 上渲染出 Android Settings；8 核、4 GiB、Windows 平衡电源模式下，真实桌面和通知栏动画仍明显掉帧，尚未达到稳定日用帧率。继续优化以正常资源预算为约束，不靠占满宿主核心或缩小分辨率。`-GpuBlob` 用来验证 QEMU 共享 GPU 内存路径，必须搭配本功能分支的 Mesa 镜像，例如：
+GPU 加速和端到端延迟证据见 [GPU_ACCELERATION.md](GPU_ACCELERATION.md)。VirGL 已从实验路径收敛为可启动、可见并持续渲染的加速路径：客机报告 `Mesa/X.org, virgl, OpenGL ES 3.1 Mesa 20.3.4`。2026-09-29 在 1003×1556、8 vCPU/4 GiB、120 Hz 的 60-FPS-target 动态场景中，热身后连续 30 秒的 29 个一秒窗口为 **70.36–110.89 FPS**，中位数 **80.53 FPS**。这是 APK 的渲染回调帧率，不是 Windows DWM/屏幕实际呈现帧率。桌面、设置和通知栏操作仍有明显延迟与不跟手；加速已实装不等于交互延迟已解决。继续优化以正常资源预算为约束，不靠占满宿主核心或缩小分辨率。`-GpuBlob` 仍是可选共享 GPU 内存实验，当前稳定验证组合不启用它：
 
 ```powershell
 .\tools\run_kikiaosp_touch_local.ps1 `
-  -BundleDir .\bundles\gpu-virgl-native-20260927 `
-  -SystemImage system-kikiaosp-gpu-virgl-native.img `
-  -VendorImage vendor-kikiaosp-gpu-virgl.img `
-  -GpuMode Virgl `
-  -GpuBlob
+  -BundleDir .\bundles\input-audio-apps-20260929 `
+  -QemuPath .\tools\qemu-src\build\qemu-system-aarch64.exe `
+  -KernelImage kernel-linux-7.3-rc4-4k-fencefix-20260927 `
+  -SystemImage system-kikiaosp-input-audio-wallpaper-allowlist-20260929.img `
+  -VendorImage vendor-hwc-ebusy-fallback-blocking-default-20260928.img `
+  -ProductImage kiki-empty-product.img `
+  -SystemExtImage kiki-empty-system_ext.img `
+  -GpuMode Virgl -HwcMode Client -DisplayBackend sdl `
+  -AudioBackend sdl -SdlSwapInterval 0 -GuestRefreshRateHz 120 `
+  -RenderEngineBackend skiaglthreaded -VcpuCount 8 `
+  -PortraitWidthPixels 1003 -PortraitHeightPixels 1556
 ```
 
-864×1728 是最小可用手机模式，不是固定分辨率；更高的动态尺寸可以使用。启动器会拒绝低于该下限的启动分辨率。每次 A/B 必须保持同一客机分辨率，基准程序按完整视口渲染，不做内部缩放，不通过降低分辨率制造虚高 FPS。
+启动器默认使用 `-snapshot`，不会写回客机磁盘。上述 APK 帧率样本使用本机 SDL QEMU sidecar 构建；干净 QEMU 构建配方仍以 `tools/build_qemu_arm64.sh` 固定的上游提交和补丁为准。早期 2026-09-28 的 30.41 秒 **SurfaceFlinger presented-frame** 样本为 58.49 FPS；它与后续 APK 回调 FPS 是不同测量边界，不能据此互相替代。旧 `vendor-kikiaosp-gpu-virgl.img` 含逐帧同步诊断，不应用来代表当前稳定组合。
 
-GPU 功能分支的设备树已把默认显示密度设为 248 dpi，并把 SettingsProvider 的新用户默认字体缩放设为 1.3；增量 system/vendor 构建产物已完成资源和属性核验。支持的 SurfaceFlinger GL 后端可用 `-RenderEngineBackend skiaglthreaded`（默认）与 `-RenderEngineBackend skiagl` 做同尺寸对照。
+864×1728 是已验证的最小像素预算，不是固定分辨率；启动器要求短边至少 864 像素且总像素不低于 1,492,992。当前默认 `1003×1556` 满足相同像素预算，窗口拉伸仍由客机原生动态分辨率适配，不把低分辨率画面放大糊弄成高分辨率。每次 A/B 必须保持同一客机分辨率，基准程序按完整视口渲染，不做内部缩放，不通过降低分辨率制造虚高 FPS。
+
+GPU 功能分支的产品默认显示密度为 248 dpi、初始字体缩放为 1.3；本机 Surface 启动配置另设 288 dpi、字体缩放 1.5。支持的 SurfaceFlinger GL 后端可用 `-RenderEngineBackend skiaglthreaded`（默认）与 `-RenderEngineBackend skiagl` 做同尺寸对照。
 
 单个 APK 的 FPS 不等于桌面、通知栏的流畅度。GPU 功能分支的 QEMU 源码补丁 `patches/qemu-gtk-global-fps-profile.patch` 提供可选的宿主 GTK GL 渲染回调探针：启动时加 `-GlobalFpsProfile`，记下输出的 `GLOBAL_FPS_LOG` 路径；保持 QEMU 手机窗口大小不变，另开 PowerShell，在 15 秒采样期间实际下拉通知栏：
 
@@ -149,7 +157,7 @@ GPU 功能分支的设备树已把默认显示密度设为 248 dpi，并把 Sett
 
 窗口停止拖动约一秒后，QEMU 将客户区的物理像素尺寸通过 VirtIO GPU UIInfo/EDID 交给客体；内核等待 EDID 与 display-info 同步完成，HWC 在同一 Android 显示对象上更新参数。尺寸还没对齐时，GTK 把上一帧完整等比放进当前窗口，拖动过程中不会只剩左上角；对齐之后绘制回到一比一，Surface 200% 缩放下是一个客体像素对一个宿主物理像素。触摸坐标使用同一次绘制比例。模式切换时 virtio-gpu 会暂时保留上一帧，避免 Android 拆平面时闪成黑屏。
 
-主线已验证 864×1728 → 2784×1876 → 864×1728，以及任意横向 2374×1530；这不等于高刷或宿主 GPU 加速已经完成。测试证据保存在本机 `~/Downloads/temp/`，其中整桌截图可能包含私人桌面背景，不提交或上传。
+主线已验证 864×1728 → 2784×1876 → 864×1728，以及任意横向 2374×1530；该尺寸切换测试本身不测量刷新率或 GPU 加速。高刷和 VirGL 另有独立的客机/应用渲染验证，实际宿主呈现帧率仍需单独采集。测试证据保存在本机 `~/Downloads/temp/`，其中整桌截图可能包含私人桌面背景，不提交或上传。
 
 ### 主线：Ethernet、扬声器与界面音效
 

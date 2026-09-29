@@ -18,7 +18,7 @@ if ($LASTEXITCODE -ne 0 -or $before -ne '0') {
 }
 $activity = (& adb -s $AdbSerial shell dumpsys activity activities 2>&1 | Out-String)
 if ($LASTEXITCODE -ne 0 -or $activity -notmatch 'topResumedActivity=.*com\.kiki\.gpubench/\.GpuBenchActivity') {
-  throw 'The Extreme benchmark must be top-resumed before tracing.'
+  throw 'The Kiki GPU benchmark Activity must be top-resumed before tracing.'
 }
 
 # Atrace is deliberately short because its instrumentation changes frame timing.
