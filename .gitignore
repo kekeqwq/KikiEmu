@@ -7,6 +7,7 @@
 !/GPU_ACCELERATION.md
 !/patches/
 /patches/*
+!/patches/qemu-kikiaosp-tested-surface-20260929.patch
 !/patches/qemu-windows-gtk-full-redraw.patch
 !/patches/qemu-windows-arm64-gtk-touch.patch
 !/patches/qemu-windows-gtk-glarea-wgl.patch

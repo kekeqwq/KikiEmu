@@ -20,7 +20,7 @@ export PKG_CONFIG_SYSROOT_DIR="$pkgconfig_sysroot"
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source_dir=${1:-"$repo_root/tools/qemu-src"}
-qemu_rev=5f664cd37aec17e8145aa117d8da68f507edc8f1
+qemu_rev=bde658eef6b38c45794bfd7ad4d2dd1b574e4694
 upstream=https://gitlab.com/qemu-project/qemu.git
 
 if [[ ! -e $source_dir ]]; then
@@ -36,26 +36,8 @@ if ! git -C "$source_dir" cat-file -e "$qemu_rev^{commit}"; then
     git -C "$source_dir" fetch origin "$qemu_rev"
 fi
 git -C "$source_dir" checkout --detach "$qemu_rev"
-git -C "$source_dir" apply --check "$repo_root/patches/qemu-windows-gtk-full-redraw.patch"
-git -C "$source_dir" apply "$repo_root/patches/qemu-windows-gtk-full-redraw.patch"
-git -C "$source_dir" apply --check "$repo_root/patches/qemu-windows-arm64-gtk-touch.patch"
-git -C "$source_dir" apply "$repo_root/patches/qemu-windows-arm64-gtk-touch.patch"
-git -C "$source_dir" apply --check "$repo_root/patches/qemu-windows-gtk-glarea-wgl.patch"
-git -C "$source_dir" apply "$repo_root/patches/qemu-windows-gtk-glarea-wgl.patch"
-git -C "$source_dir" apply --check "$repo_root/patches/qemu-windows-sdl-gl-wgl.patch"
-git -C "$source_dir" apply "$repo_root/patches/qemu-windows-sdl-gl-wgl.patch"
-git -C "$source_dir" apply --check "$repo_root/patches/qemu-windows-gtk-glarea-native-pixels.patch"
-git -C "$source_dir" apply "$repo_root/patches/qemu-windows-gtk-glarea-native-pixels.patch"
-git -C "$source_dir" apply --check "$repo_root/patches/qemu-gtk-native-resize-touch-focus.patch"
-git -C "$source_dir" apply "$repo_root/patches/qemu-gtk-native-resize-touch-focus.patch"
-git -C "$source_dir" apply --check "$repo_root/patches/qemu-gtk-global-fps-profile.patch"
-git -C "$source_dir" apply "$repo_root/patches/qemu-gtk-global-fps-profile.patch"
-git -C "$source_dir" apply --check "$repo_root/patches/qemu-gtk-guest-refresh-rate.patch"
-git -C "$source_dir" apply "$repo_root/patches/qemu-gtk-guest-refresh-rate.patch"
-git -C "$source_dir" apply --recount --check "$repo_root/patches/qemu-windows-gtk-resize-commit-on-release.patch"
-git -C "$source_dir" apply --recount "$repo_root/patches/qemu-windows-gtk-resize-commit-on-release.patch"
-git -C "$source_dir" apply --check "$repo_root/patches/qemu-sdl-ignore-host-key-repeat.patch"
-git -C "$source_dir" apply "$repo_root/patches/qemu-sdl-ignore-host-key-repeat.patch"
+git -C "$source_dir" apply --check "$repo_root/patches/qemu-kikiaosp-tested-surface-20260929.patch"
+git -C "$source_dir" apply "$repo_root/patches/qemu-kikiaosp-tested-surface-20260929.patch"
 
 mkdir -p "$source_dir/build"
 (

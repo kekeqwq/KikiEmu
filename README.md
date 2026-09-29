@@ -66,7 +66,7 @@ pacman -S --needed git make ninja python pkgconf \
 ./tools/build_qemu_arm64.sh
 ```
 
-脚本从上游 QEMU 检出固定提交，应用 Windows ARM 触摸/重绘与 WGL 兼容补丁，再应用原生像素动态分辨率、缩放反馈修正、触摸优先输入和可选全局 GL 帧探针，构建 `aarch64-softmmu` 的 GTK/WHPX 版本。它会将 `pkg-config` 依赖搜索锁定在 CLANGARM64 前缀，避免同机 UCRT64/x86_64 GLib 混入 ARM64 构建。脚本遇到已有脏 QEMU 源码会拒绝覆盖；可传另一个空目录作参数。本机已验证构建在 `tools/qemu-src/build/qemu-system-aarch64.exe`；GPU 实验版通过 `-QemuPath` 指向对应的独立 QEMU 产物。运行时脚本会把 `C:\msys64\clangarm64\bin` 加入该进程的 DLL 搜索路径。单独复制 EXE 不等于可移植安装包，还需要匹配的 MSYS2 运行库。
+脚本固定到 QEMU 上游 `bde658eef6b38c45794bfd7ad4d2dd1b574e4694`，应用 `patches/qemu-kikiaosp-tested-surface-20260929.patch` 中已在 Surface 验证过的 SDL/WGL、DPI 原生像素、Windows WM_POINTER 触摸、禁止鼠标抓取、120Hz Guest UIInfo、VirGL 与 SDL 音频改动，构建 `aarch64-softmmu` 的 GTK/WHPX 版本。此前脚本仍锁在较旧的 `5f664cd` 并只应用部分 GTK 补丁，导致回溯构建出现窗口尺寸、刷新率、触摸和 Grab 回归；新脚本从干净源码检出完整稳定改动。它会将 `pkg-config` 依赖搜索锁定在 CLANGARM64 前缀，避免同机 UCRT64/x86_64 GLib 混入 ARM64 构建。脚本遇到已有脏 QEMU 源码会拒绝覆盖；可传另一个空目录作参数。本机已验证构建在 `tools/qemu-src/build/qemu-system-aarch64.exe`；GPU 实验版通过 `-QemuPath` 指向对应的独立 QEMU 产物。运行时脚本会把 `C:\msys64\clangarm64\bin` 加入该进程的 DLL 搜索路径。单独复制 EXE 不等于可移植安装包，还需要匹配的 MSYS2 运行库。
 
 在 Windows PowerShell 中检查已构建 EXE 的 PE Machine（ARM64 为 `0xAA64`）：
 

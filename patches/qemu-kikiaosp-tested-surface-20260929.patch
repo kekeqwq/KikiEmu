@@ -1,0 +1,2672 @@
+diff --git a/audio/sdlaudio.c b/audio/sdlaudio.c
+index bd6a46e..3010e99 100644
+--- a/audio/sdlaudio.c
++++ b/audio/sdlaudio.c
+@@ -29,6 +29,7 @@
+ #include "qemu/error-report.h"
+ #include "qapi/error.h"
+ #include "qemu/audio.h"
++#include "qemu/bswap.h"
+ #include "qom/object.h"
+ 
+ #ifndef _WIN32
+@@ -197,9 +198,137 @@ static SDL_AudioDeviceID sdl_open(SDL_AudioSpec *req, SDL_AudioSpec *obt,
+     return devid;
+ }
+ 
++/* Fade queued output samples to silence before tearing down the host device. */
++static void sdl_fade_sample(struct audio_pcm_info *info, uint8_t *p,
++                            size_t gain, size_t gain_max)
++{
++    switch (info->af) {
++    case AUDIO_FORMAT_S8: {
++        int8_t value;
++
++        memcpy(&value, p, sizeof(value));
++        value = (int8_t)((int64_t)value * gain / gain_max);
++        memcpy(p, &value, sizeof(value));
++        break;
++    }
++    case AUDIO_FORMAT_U8: {
++        int64_t value = (int64_t)*p - 128;
++
++        *p = (uint8_t)(value * gain / gain_max + 128);
++        break;
++    }
++    case AUDIO_FORMAT_S16:
++    case AUDIO_FORMAT_U16: {
++        uint16_t raw;
++        int64_t value;
++
++        memcpy(&raw, p, sizeof(raw));
++        if (info->swap_endianness) {
++            raw = bswap16(raw);
++        }
++        value = info->af == AUDIO_FORMAT_S16
++            ? (int16_t)raw : (int64_t)raw - INT16_MAX;
++        value = value * gain / gain_max;
++        raw = info->af == AUDIO_FORMAT_S16
++            ? (uint16_t)(int16_t)value : (uint16_t)(value + INT16_MAX);
++        if (info->swap_endianness) {
++            raw = bswap16(raw);
++        }
++        memcpy(p, &raw, sizeof(raw));
++        break;
++    }
++    case AUDIO_FORMAT_S32:
++    case AUDIO_FORMAT_U32: {
++        uint32_t raw;
++        int64_t value;
++
++        memcpy(&raw, p, sizeof(raw));
++        if (info->swap_endianness) {
++            raw = bswap32(raw);
++        }
++        value = info->af == AUDIO_FORMAT_S32
++            ? (int32_t)raw : (int64_t)raw - INT32_MAX;
++        value = value * gain / gain_max;
++        raw = info->af == AUDIO_FORMAT_S32
++            ? (uint32_t)(int32_t)value : (uint32_t)(value + INT32_MAX);
++        if (info->swap_endianness) {
++            raw = bswap32(raw);
++        }
++        memcpy(p, &raw, sizeof(raw));
++        break;
++    }
++    case AUDIO_FORMAT_F32: {
++        uint32_t raw;
++        float value;
++
++        memcpy(&raw, p, sizeof(raw));
++        if (info->swap_endianness) {
++            raw = bswap32(raw);
++        }
++        memcpy(&value, &raw, sizeof(value));
++        value *= (float)gain / gain_max;
++        memcpy(&raw, &value, sizeof(raw));
++        if (info->swap_endianness) {
++            raw = bswap32(raw);
++        }
++        memcpy(p, &raw, sizeof(raw));
++        break;
++    }
++    case AUDIO_FORMAT__MAX:
++        g_assert_not_reached();
++    }
++}
++
++static void sdl_fade_pending_out(SDLVoiceOut *sdl)
++{
++    HWVoiceOut *hw = &sdl->hw;
++    struct audio_pcm_info *info = &hw->info;
++    size_t frame_bytes = info->bytes_per_frame;
++    size_t sample_bytes = audio_format_bits(info->af) / 8;
++    size_t pending_frames, fade_frames, pos;
++
++    if (!frame_bytes || !sample_bytes || !hw->pending_emul || !hw->size_emul) {
++        return;
++    }
++
++    pending_frames = hw->pending_emul / frame_bytes;
++    fade_frames = MIN(pending_frames, (size_t)MAX(1, info->freq / 100));
++    pos = audio_ring_posb(hw->pos_emul, hw->pending_emul, hw->size_emul);
++    pos = (pos + (pending_frames - fade_frames) * frame_bytes) % hw->size_emul;
++
++    for (size_t i = 0; i < fade_frames; i++) {
++        for (int channel = 0; channel < info->nchannels; channel++) {
++            sdl_fade_sample(info,
++                            (uint8_t *)hw->buf_emul + pos + channel * sample_bytes,
++                            fade_frames - i - 1, fade_frames);
++        }
++        pos = (pos + frame_bytes) % hw->size_emul;
++    }
++}
++
+ static void sdl_close_out(SDLVoiceOut *sdl)
+ {
+     if (sdl->initialized) {
++        HWVoiceOut *hw = &sdl->hw;
++        size_t pending_bytes;
++        int pending_ms, buffered_ms, drain_ms;
++
++        SDL_LockAudioDevice(sdl->devid);
++        sdl_fade_pending_out(sdl);
++        pending_bytes = hw->pending_emul;
++        pending_ms = hw->info.bytes_per_second
++            ? DIV_ROUND_UP(pending_bytes * 1000, hw->info.bytes_per_second) : 0;
++        buffered_ms = hw->info.freq
++            ? DIV_ROUND_UP(hw->samples * 1000, hw->info.freq) : 0;
++        drain_ms = MIN(250, MAX(30, pending_ms + buffered_ms));
++        sdl->exit = 0;
++        SDL_UnlockAudioDevice(sdl->devid);
++
++        /* Let SDL submit the faded tail and silence before closing the host
++         * endpoint, instead of stopping it on an arbitrary non-zero sample. */
++        SDL_PauseAudioDevice(sdl->devid, 0);
++        SDL_Delay(drain_ms);
++
+         SDL_LockAudioDevice(sdl->devid);
+         sdl->exit = 1;
+         SDL_UnlockAudioDevice(sdl->devid);
+diff --git a/hw/display/trace-events b/hw/display/trace-events
+index c5e7e42..1a62b57 100644
+--- a/hw/display/trace-events
++++ b/hw/display/trace-events
+@@ -58,6 +58,14 @@ virtio_gpu_fence_resp(uint64_t fence) "fence 0x%" PRIx64
+ virtio_gpu_inc_inflight_fences(uint32_t inflight) "in-flight+ %u"
+ virtio_gpu_dec_inflight_fences(uint32_t inflight) "in-flight- %u"
+ virtio_gpu_cmd_suspended(uint32_t cmd) "cmd 0x%x"
++virtio_gpu_ctrl_cb(void) "control virtqueue callback"
++virtio_gpu_ctrl_bh_enter(void) "control bottom half enter"
++virtio_gpu_ctrl_bh_exit(void) "control bottom half exit"
++virtio_gpu_cmd_process_start(void) "command handler start"
++virtio_gpu_cmd_process_done(uint32_t type, uint64_t fence) "type 0x%x fence 0x%" PRIx64
++kiki_virgl_submit_start(uint32_t ctx, uint32_t bytes) "ctx=%u bytes=%u"
++kiki_virgl_submit_done(uint32_t ctx, uint32_t bytes, int ret) "ctx=%u bytes=%u ret=%d"
++kiki_virgl_submit_slow(uint32_t ctx, uint32_t bytes, uint32_t elapsed_us, const char *commands) "ctx=%u bytes=%u elapsed_us=%u commands=%s"
+ 
+ # qxl.c
+ disable qxl_io_write_vga(int qid, const char *mode, uint32_t addr, uint32_t val) "%d %s addr=%u val=%u"
+diff --git a/hw/display/virtio-gpu-base.c b/hw/display/virtio-gpu-base.c
+index 270fbaa..b27baf0 100644
+--- a/hw/display/virtio-gpu-base.c
++++ b/hw/display/virtio-gpu-base.c
+@@ -101,6 +101,18 @@ static void virtio_gpu_notify_event(VirtIOGPUBase *g, uint32_t event_type)
+ static void virtio_gpu_ui_info(void *opaque, uint32_t idx, QemuUIInfo *info)
+ {
+     VirtIOGPUBase *g = opaque;
++    const char *trace_path = g_getenv("KIKI_GTK_RESOLUTION_TRACE");
++
++    if (trace_path) {
++        FILE *file = fopen(trace_path, "a");
++        if (file) {
++            fprintf(file, "time=%" G_GINT64_FORMAT
++                    " gpu-ui-info idx=%u size=%u,%u refresh=%u\n",
++                    g_get_monotonic_time(), idx, info->width, info->height,
++                    info->refresh_rate);
++            fclose(file);
++        }
++    }
+ 
+     if (idx >= g->conf.max_outputs) {
+         return;
+diff --git a/hw/display/virtio-gpu-virgl.c b/hw/display/virtio-gpu-virgl.c
+index f455710..d3506de 100644
+--- a/hw/display/virtio-gpu-virgl.c
++++ b/hw/display/virtio-gpu-virgl.c
+@@ -629,12 +629,87 @@ static void virgl_cmd_set_scanout(VirtIOGPU *g,
+     g->parent_obj.scanout[ss.scanout_id].resource_id = ss.resource_id;
+ }
+ 
++static void virgl_trace_slow_submit(uint32_t ctx_id, uint32_t bytes,
++                                    uint32_t elapsed_us, const void *buffer)
++{
++    const uint32_t *dwords = buffer;
++    uint32_t counts[256] = { 0 };
++    uint32_t max_lengths[256] = { 0 };
++    uint32_t first_cmd[8];
++    uint32_t first_obj[8];
++    uint32_t first_len[8];
++    char summary[2048];
++    uint32_t total_dwords = bytes / sizeof(uint32_t);
++    uint32_t offset = 0;
++    uint32_t commands = 0;
++    uint32_t invalid = 0;
++    size_t used = 0;
++    int n;
++
++    while (offset < total_dwords) {
++        uint32_t header = ldl_le_p(&dwords[offset]);
++        uint32_t length = header >> 16;
++        uint32_t cmd = header & 0xff;
++        uint32_t obj = (header >> 8) & 0xff;
++
++        if (length > total_dwords - offset - 1) {
++            invalid = 1;
++            break;
++        }
++        counts[cmd]++;
++        max_lengths[cmd] = MAX(max_lengths[cmd], length);
++        if (commands < G_N_ELEMENTS(first_cmd)) {
++            first_cmd[commands] = cmd;
++            first_obj[commands] = obj;
++            first_len[commands] = length;
++        }
++        commands++;
++        offset += length + 1;
++    }
++
++    n = g_snprintf(summary, sizeof(summary), "n=%u invalid=%u head=",
++                   commands, invalid);
++    used = MIN((size_t)n, sizeof(summary) - 1);
++    for (uint32_t i = 0; i < MIN(commands, G_N_ELEMENTS(first_cmd)); i++) {
++        n = g_snprintf(summary + used, sizeof(summary) - used,
++                       "%s%02x/%02x/%u", i ? "," : "",
++                       first_cmd[i], first_obj[i], first_len[i]);
++        if (n < 0 || (size_t)n >= sizeof(summary) - used) {
++            used = sizeof(summary) - 1;
++            break;
++        }
++        used += n;
++    }
++    n = g_snprintf(summary + used, sizeof(summary) - used, " hist=");
++    if (n > 0 && (size_t)n < sizeof(summary) - used) {
++        used += n;
++    }
++    for (uint32_t i = 0; i < G_N_ELEMENTS(counts); i++) {
++        if (!counts[i] || used >= sizeof(summary) - 1) {
++            continue;
++        }
++        n = g_snprintf(summary + used, sizeof(summary) - used,
++                       "%s%02x:%u:%u", used && summary[used - 1] != '=' ? "," : "",
++                       i, counts[i], max_lengths[i]);
++        if (n < 0 || (size_t)n >= sizeof(summary) - used) {
++            used = sizeof(summary) - 1;
++            break;
++        }
++        used += n;
++    }
++
++    trace_kiki_virgl_submit_slow(ctx_id, bytes, elapsed_us, summary);
++}
++
+ static void virgl_cmd_submit_3d(VirtIOGPU *g,
+                                 struct virtio_gpu_ctrl_command *cmd)
+ {
+     struct virtio_gpu_cmd_submit cs;
+     void *buf;
+     size_t s;
++    gint64 submit_start_us;
++    uint32_t submit_elapsed_us;
++    int ret;
+ 
+     VIRTIO_GPU_FILL_CMD(cs);
+     trace_virtio_gpu_cmd_ctx_submit(cs.hdr.ctx_id, cs.size);
+@@ -666,7 +741,15 @@ static void virgl_cmd_submit_3d(VirtIOGPU *g,
+         g->stats.bytes_3d += cs.size;
+     }
+ 
+-    virgl_renderer_submit_cmd(buf, cs.hdr.ctx_id, cs.size / 4);
++    submit_start_us = g_get_monotonic_time();
++    trace_kiki_virgl_submit_start(cs.hdr.ctx_id, cs.size);
++    ret = virgl_renderer_submit_cmd(buf, cs.hdr.ctx_id, cs.size / 4);
++    submit_elapsed_us = g_get_monotonic_time() - submit_start_us;
++    trace_kiki_virgl_submit_done(cs.hdr.ctx_id, cs.size, ret);
++    if (submit_elapsed_us > 8333) {
++        virgl_trace_slow_submit(cs.hdr.ctx_id, cs.size,
++                                submit_elapsed_us, buf);
++    }
+ 
+ out:
+     g_free(buf);
+@@ -1478,6 +1561,9 @@ static int virtio_gpu_virgl_init(VirtIOGPU *g)
+     if (qemu_egl_display) {
+         virtio_gpu_3d_cbs.version = 4;
+         virtio_gpu_3d_cbs.get_egl_display = virgl_get_egl_display;
++        if (qemu_egl_mode == DISPLAY_GL_MODE_ES) {
++            flags |= VIRGL_RENDERER_USE_GLES;
++        }
+ #if VIRGL_CHECK_VERSION(1, 1, 2)
+         virtio_gpu_3d_cbs.write_fence         = virgl_write_async_fence;
+         virtio_gpu_3d_cbs.write_context_fence = virgl_write_async_context_fence;
+diff --git a/hw/display/virtio-gpu.c b/hw/display/virtio-gpu.c
+index bb0f41b..e47be19 100644
+--- a/hw/display/virtio-gpu.c
++++ b/hw/display/virtio-gpu.c
+@@ -434,10 +434,46 @@ void virtio_gpu_release_scanout_dmabuf(VirtIOGPU *g, int scanout_id)
+ void virtio_gpu_disable_scanout(VirtIOGPU *g, int scanout_id)
+ {
+     struct virtio_gpu_scanout *scanout = &g->parent_obj.scanout[scanout_id];
++    bool hold_last_surface = false;
++    const char *resolution_trace = g_getenv("KIKI_GTK_RESOLUTION_TRACE");
++
++#ifdef G_OS_WIN32
++    /*
++     * Android briefly disables the primary plane while applying a new DRM
++     * mode.  Replacing the console surface with NULL makes that normal
++     * transition visible as a black flash.  KikiAOSP's native-resolution
++     * frontend keeps the last completed 2D frame until the guest installs
++     * its first framebuffer for the new mode.  The DisplaySurface retains a
++     * pixman reference, so the backing resource remains valid until the next
++     * qemu_console_set_surface() releases it.
++     */
++    /*
++     * A mode switch disables the scanout more than once. The first call
++     * still has the old surface; later calls see ds == NULL. Keep the
++     * console surface across all of those calls, or the follow-up disable
++     * clears the frame we just held.
++     */
++    hold_last_surface =
++        g_strcmp0(g_getenv("KIKI_VIRTIO_GPU_HOLD_LAST_SCANOUT"), "1") == 0 &&
++        scanout->dmabuf == NULL;
++#endif
++
++    if (resolution_trace) {
++        FILE *file = fopen(resolution_trace, "a");
++        if (file) {
++            fprintf(file, "time=%" G_GINT64_FORMAT
++                    " scanout-disable id=%d resource=%u hold=%d ds=%p dmabuf=%p\n",
++                    g_get_monotonic_time(), scanout_id, scanout->resource_id,
++                    hold_last_surface, scanout->ds, scanout->dmabuf);
++            fclose(file);
++        }
++    }
+ 
+     virtio_gpu_release_scanout_dmabuf(g, scanout_id);
+     qemu_console_gl_scanout_disable(scanout->con);
+-    qemu_console_set_surface(scanout->con, NULL);
++    if (!hold_last_surface) {
++        qemu_console_set_surface(scanout->con, NULL);
++    }
+     scanout->resource_id = 0;
+     scanout->ds = NULL;
+     scanout->width = 0;
+@@ -1209,6 +1245,7 @@ void virtio_gpu_simple_process_cmd(VirtIOGPU *g,
+ static void virtio_gpu_handle_ctrl_cb(VirtIODevice *vdev, VirtQueue *vq)
+ {
+     VirtIOGPU *g = VIRTIO_GPU(vdev);
++    trace_virtio_gpu_ctrl_cb();
+     qemu_bh_schedule(g->ctrl_bh);
+ }
+ 
+@@ -1235,7 +1272,10 @@ void virtio_gpu_process_cmdq(VirtIOGPU *g)
+         }
+ 
+         /* process command */
++        trace_virtio_gpu_cmd_process_start();
+         vgc->process_cmd(g, cmd);
++        trace_virtio_gpu_cmd_process_done(cmd->cmd_hdr.type,
++                                          cmd->cmd_hdr.fence_id);
+ 
+         /* command suspended */
+         if (!cmd->finished && !(cmd->cmd_hdr.flags & VIRTIO_GPU_FLAG_FENCE)) {
+@@ -1260,6 +1300,7 @@ void virtio_gpu_process_cmdq(VirtIOGPU *g)
+         } else {
+             g_free(cmd);
+         }
++
+     }
+     g->processing_cmdq = false;
+ }
+@@ -1314,7 +1355,9 @@ static void virtio_gpu_ctrl_bh(void *opaque)
+     VirtIOGPU *g = opaque;
+     VirtIOGPUClass *vgc = VIRTIO_GPU_GET_CLASS(g);
+ 
++    trace_virtio_gpu_ctrl_bh_enter();
+     vgc->handle_ctrl(VIRTIO_DEVICE(g), g->ctrl_vq);
++    trace_virtio_gpu_ctrl_bh_exit();
+ }
+ 
+ static void virtio_gpu_handle_cursor(VirtIODevice *vdev, VirtQueue *vq)
+diff --git a/include/ui/gtk.h b/include/ui/gtk.h
+index 6b62e97..3a6a257 100644
+--- a/include/ui/gtk.h
++++ b/include/ui/gtk.h
+@@ -149,6 +149,12 @@ struct GtkDisplayState {
+ 
+     bool external_pause_update;
+ 
++#ifdef G_OS_WIN32
++    bool native_resize_hooked;
++    bool native_resize_active;
++    guint native_resize_commit_source;
++#endif
++
+     QemuClipboardPeer cbpeer;
+     uint32_t cbpending[QEMU_CLIPBOARD_SELECTION__COUNT];
+     GtkClipboard *gtkcb[QEMU_CLIPBOARD_SELECTION__COUNT];
+diff --git a/include/ui/sdl2.h b/include/ui/sdl2.h
+index 9daf5ec..4cd9eb8 100644
+--- a/include/ui/sdl2.h
++++ b/include/ui/sdl2.h
+@@ -22,6 +22,7 @@
+ #endif
+ 
+ #include "ui/kbd-state.h"
++#include "ui/input.h"
+ #ifdef CONFIG_OPENGL
+ # include "ui/egl-helpers.h"
+ #endif
+@@ -46,6 +47,11 @@ struct sdl2_console {
+     SDL_GLContext winctx;
+     QKbdState *kbd;
+     bool has_dmabuf;
++#ifdef CONFIG_WIN32
++    struct touch_slot touch_slots[INPUT_EVENT_SLOTS_MAX];
++    uint32_t touch_pointer_ids[INPUT_EVENT_SLOTS_MAX];
++    uint32_t touch_mouse_suppress_until;
++#endif
+ #ifdef CONFIG_OPENGL
+     QemuGLShader *gls;
+     egl_fb guest_fb;
+diff --git a/meson.build b/meson.build
+index cfac634..423652e 100644
+--- a/meson.build
++++ b/meson.build
+@@ -3207,8 +3207,12 @@ if host_os == 'windows'
+     }
+   ''', name: 'mingw setjmp and longjmp')
+ 
++  # MSYS2 ARM64 currently provides the native setjmp/longjmp ABI but does
++  # not export the x86-oriented __mingw_setjmp/__mingw_longjmp aliases.
++  # Do not reject the native Windows ARM64 build on that configure-only
++  # probe; the QEMU TCG code uses the CRT setjmp implementation directly.
+   if cpu == 'aarch64' and not mingw_has_setjmp_longjmp
+-    error('mingw must provide setjmp/longjmp for windows-arm64')
++    warning('mingw setjmp/longjmp aliases unavailable; continuing with native CRT ABI')
+   endif
+ endif
+ 
+diff --git a/ui/egl-context.c b/ui/egl-context.c
+index 5787199..9d28abe 100644
+--- a/ui/egl-context.c
++++ b/ui/egl-context.c
+@@ -1,6 +1,27 @@
+ #include "qemu/osdep.h"
+ #include "qemu/error-report.h"
+ #include "ui/egl-context.h"
++#include <epoxy/gl.h>
++
++static void kiki_log_egl_context(const char *stage, int major, int minor,
++                                 EGLContext ctx, EGLint error)
++{
++    const char *path = getenv("KIKI_ANGLE_CTX_LOG");
++    FILE *log;
++
++    if (!path) {
++        return;
++    }
++    log = fopen(path, "a");
++    if (!log) {
++        return;
++    }
++    fprintf(log, "%s requested=%d.%d context=%p error=0x%x gl_version=%s\n",
++            stage, major, minor, (void *)ctx, error,
++            strcmp(stage, "make_current") == 0 && ctx != EGL_NO_CONTEXT ?
++                (const char *)glGetString(GL_VERSION) : "(not queried)");
++    fclose(log);
++}
+ 
+ QEMUGLContext qemu_egl_create_context(DisplayGLCtx *dgc,
+                                       QEMUGLParams *params,
+@@ -22,6 +43,8 @@ QEMUGLContext qemu_egl_create_context(DisplayGLCtx *dgc,
+ 
+    ctx = eglCreateContext(qemu_egl_display, qemu_egl_config, share_context,
+                           gles ? ctx_att_gles : ctx_att_core);
++   kiki_log_egl_context("create", params->major_ver, params->minor_ver,
++                        ctx, eglGetError());
+    return ctx;
+ }
+ 
+@@ -38,6 +61,7 @@ int qemu_egl_make_context_current(DisplayGLCtx *dgc,
+         error_report("egl: eglMakeCurrent failed: %s", qemu_egl_get_error_string());
+         return -1;
+    }
++   kiki_log_egl_context("make_current", 0, 0, ctx, eglGetError());
+ 
+    return 0;
+ }
+diff --git a/ui/egl-helpers.c b/ui/egl-helpers.c
+index cb9c1e8..1548faa 100644
+--- a/ui/egl-helpers.c
++++ b/ui/egl-helpers.c
+@@ -476,7 +476,8 @@ EGLSurface qemu_egl_init_surface_x11(EGLContext ectx, EGLNativeWindowType win)
+                                       qemu_egl_config,
+                                       win, NULL);
+     if (esurface == EGL_NO_SURFACE) {
+-        error_report("egl: eglCreateWindowSurface failed");
++        error_report("egl: eglCreateWindowSurface failed for window %p: %s",
++                     (void *)win, qemu_egl_get_error_string());
+         return NULL;
+     }
+ 
+diff --git a/ui/gtk-egl.c b/ui/gtk-egl.c
+index 0eec068..d3433bd 100644
+--- a/ui/gtk-egl.c
++++ b/ui/gtk-egl.c
+@@ -21,9 +21,14 @@
+ #include "ui/gtk.h"
+ #include "ui/egl-helpers.h"
+ #include "ui/shader.h"
++#include <epoxy/gl.h>
+ 
+ #include "system/system.h"
+ 
++#ifdef G_OS_WIN32
++#include <gdk/gdkwin32.h>
++#endif
++
+ static void gtk_egl_set_scanout_mode(VirtualConsole *vc, bool scanout)
+ {
+     if (vc->gfx.scanout_mode == scanout) {
+@@ -51,14 +56,32 @@ void gd_egl_init(VirtualConsole *vc)
+         return;
+     }
+ 
+-    Window x11_window = gdk_x11_window_get_xid(gdk_window);
+-    if (!x11_window) {
++#ifdef G_OS_WIN32
++    if (!gdk_window_ensure_native(gdk_window)) {
++        error_report("Kiki ANGLE could not create a native GTK drawing window");
++        return;
++    }
++    EGLNativeWindowType native_window = (EGLNativeWindowType)
++        gdk_win32_window_get_impl_hwnd(gdk_window);
++    RECT client_rect = {0};
++    GetClientRect((HWND)native_window, &client_rect);
++    error_report("Kiki ANGLE view=%p window=%p valid=%d client=%ldx%ld style=0x%lx exstyle=0x%lx",
++                 (void *)vc, (void *)native_window, IsWindow((HWND)native_window),
++                 client_rect.right - client_rect.left,
++                 client_rect.bottom - client_rect.top,
++                 (unsigned long)GetWindowLongPtr((HWND)native_window, GWL_STYLE),
++                 (unsigned long)GetWindowLongPtr((HWND)native_window, GWL_EXSTYLE));
++#else
++    EGLNativeWindowType native_window = (EGLNativeWindowType)
++        gdk_x11_window_get_xid(gdk_window);
++#endif
++    if (!native_window) {
+         return;
+     }
+ 
+     vc->gfx.ectx = qemu_egl_init_ctx();
+     vc->gfx.esurface = qemu_egl_init_surface_x11
+-        (vc->gfx.ectx, (EGLNativeWindowType)x11_window);
++        (vc->gfx.ectx, native_window);
+ 
+     assert(vc->gfx.esurface);
+ }
+@@ -413,12 +436,18 @@ void gd_egl_flush(DisplayChangeListener *dcl,
+ 
+ void gtk_egl_init(DisplayGLMode mode)
+ {
++#ifdef G_OS_WIN32
++    if (qemu_egl_init_dpy_win32(EGL_DEFAULT_DISPLAY, mode) < 0) {
++        return;
++    }
++#else
+     GdkDisplay *gdk_display = gdk_display_get_default();
+     Display *x11_display = gdk_x11_display_get_xdisplay(gdk_display);
+ 
+     if (qemu_egl_init_dpy_x11(x11_display, mode) < 0) {
+         return;
+     }
++#endif
+ 
+     display_opengl = 1;
+ }
+@@ -439,12 +468,25 @@ int gd_egl_make_current(DisplayGLCtx *dgc,
+                         QEMUGLContext ctx)
+ {
+     VirtualConsole *vc = container_of(dgc, VirtualConsole, gfx.dgc);
++    static unsigned int context_log_count;
+ 
+     if (!eglMakeCurrent(qemu_egl_display, vc->gfx.esurface,
+                         vc->gfx.esurface, ctx)) {
+         error_report("egl: eglMakeCurrent failed: %s", qemu_egl_get_error_string());
+         return -1;
+     }
++    if (ctx != EGL_NO_CONTEXT && context_log_count++ < 32) {
++        const char *path = getenv("KIKI_ANGLE_CTX_LOG");
++        if (path) {
++            FILE *log = fopen(path, "a");
++            if (log) {
++                fprintf(log, "gtk_make_current context=%p gl_version=%s gl_renderer=%s\n",
++                        (void *)ctx, (const char *)glGetString(GL_VERSION),
++                        (const char *)glGetString(GL_RENDERER));
++                fclose(log);
++            }
++        }
++    }
+ 
+     return 0;
+ }
+diff --git a/ui/gtk-gl-area.c b/ui/gtk-gl-area.c
+index effd88f..0cf35e0 100644
+--- a/ui/gtk-gl-area.c
++++ b/ui/gtk-gl-area.c
+@@ -18,6 +18,205 @@
+ 
+ #include "system/system.h"
+ 
++#ifdef G_OS_WIN32
++#include <windows.h>
++#include <GL/wgl.h>
++#include <GL/wglext.h>
++#endif
++
++/* Optional probe/control for the host WGL presentation interval. */
++#ifdef G_OS_WIN32
++static void kiki_gtk_wgl_swap_control(void)
++{
++    static HGLRC configured_context;
++    static HMODULE opengl32;
++    static PFNWGLGETCURRENTCONTEXTPROC get_current_context;
++    static PFNWGLGETPROCADDRESSPROC get_proc_address;
++    HGLRC context;
++    const char *requested = g_getenv("KIKI_GTK_SWAP_INTERVAL");
++    const char *profile_path = g_getenv("KIKI_GPU_PROFILE_PATH");
++    PFNWGLSWAPINTERVALEXTPROC set_interval;
++    PFNWGLGETSWAPINTERVALEXTPROC get_interval;
++    PROC set_proc, get_proc;
++    FILE *output;
++    int before = -1, after = -1, value = -1, changed = 0;
++
++    if (!g_getenv("KIKI_GPU_PROFILE") && !requested) {
++        return;
++    }
++
++    if (!opengl32) {
++        opengl32 = GetModuleHandleA("opengl32.dll");
++        if (!opengl32) {
++            opengl32 = LoadLibraryA("opengl32.dll");
++        }
++        if (opengl32) {
++            get_current_context = (PFNWGLGETCURRENTCONTEXTPROC)
++                GetProcAddress(opengl32, "wglGetCurrentContext");
++            get_proc_address = (PFNWGLGETPROCADDRESSPROC)
++                GetProcAddress(opengl32, "wglGetProcAddress");
++        }
++    }
++    if (!get_current_context || !get_proc_address) {
++        return;
++    }
++    context = get_current_context();
++    if (!context || context == configured_context) {
++        return;
++    }
++
++    set_proc = get_proc_address("wglSwapIntervalEXT");
++    get_proc = get_proc_address("wglGetSwapIntervalEXT");
++    if (set_proc == NULL || set_proc == (PROC)1 || set_proc == (PROC)2 ||
++        set_proc == (PROC)3 || set_proc == (PROC)-1) {
++        set_proc = NULL;
++    }
++    if (get_proc == NULL || get_proc == (PROC)1 || get_proc == (PROC)2 ||
++        get_proc == (PROC)3 || get_proc == (PROC)-1) {
++        get_proc = NULL;
++    }
++    set_interval = (PFNWGLSWAPINTERVALEXTPROC)set_proc;
++    get_interval = (PFNWGLGETSWAPINTERVALEXTPROC)get_proc;
++
++    if (get_interval) {
++        before = get_interval();
++    }
++    if (requested && (!strcmp(requested, "0") || !strcmp(requested, "1")) &&
++        set_interval) {
++        value = requested[0] - '0';
++        changed = set_interval(value);
++    }
++    if (get_interval) {
++        after = get_interval();
++    }
++
++    output = profile_path ? fopen(profile_path, "a") : stderr;
++    if (output) {
++        fprintf(output,
++                "KIKI-WGL-SWAP-CONTROL requested=%s before=%d after=%d "
++                "set_ok=%d get_supported=%d set_supported=%d\n",
++                requested ? requested : "default", before, after, changed,
++                get_interval != NULL, set_interval != NULL);
++        if (output != stderr) {
++            fclose(output);
++        }
++    }
++    configured_context = context;
++}
++#endif
++
++/* Opt-in host-side timing for the real-size VirGL performance investigation. */
++static struct {
++    int enabled;
++    gint64 period_start_us;
++    gint64 last_flush_us;
++    gint64 last_render_start_us;
++    guint flushes;
++    guint renders;
++    guint queue_samples;
++    guint interval_count;
++    guint stalls_33ms;
++    guint stalls_50ms;
++    guint stalls_100ms;
++    guint idle_gaps;
++    gint64 intervals_us[1024];
++    gint64 draw_total_us;
++    gint64 draw_max_us;
++    gint64 queue_total_us;
++} kiki_gl_profile = { .enabled = -1 };
++static uint64_t kiki_gl_scanout_sequence;
++
++static int kiki_gl_compare_interval(const void *a, const void *b)
++{
++    const gint64 left = *(const gint64 *)a;
++    const gint64 right = *(const gint64 *)b;
++    return (left > right) - (left < right);
++}
++
++static gboolean kiki_gl_profile_report(gpointer opaque)
++{
++    const char *profile_path = g_getenv("KIKI_GPU_PROFILE_PATH");
++    FILE *profile_output = profile_path ? fopen(profile_path, "a") : NULL;
++    gint64 now_us = g_get_monotonic_time();
++    gint64 elapsed_us = now_us - kiki_gl_profile.period_start_us;
++    double p50_ms = 0.0, p95_ms = 0.0, p99_ms = 0.0;
++    guint interval_count = 0;
++    guint i;
++
++    (void)opaque;
++
++    if (elapsed_us <= 0) {
++        return G_SOURCE_CONTINUE;
++    }
++    for (i = 0; i < kiki_gl_profile.interval_count; i++) {
++        /* Ignore long quiet periods in frame-time percentiles. The fixed
++         * window FPS below still reports that the guest was idle. */
++        if (kiki_gl_profile.intervals_us[i] <= G_USEC_PER_SEC) {
++            kiki_gl_profile.intervals_us[interval_count++] =
++                kiki_gl_profile.intervals_us[i];
++        }
++    }
++    if (interval_count) {
++        qsort(kiki_gl_profile.intervals_us, interval_count,
++              sizeof(kiki_gl_profile.intervals_us[0]), kiki_gl_compare_interval);
++        p50_ms = kiki_gl_profile.intervals_us[interval_count / 2] / 1000.0;
++        p95_ms = kiki_gl_profile.intervals_us[(interval_count * 95 - 1) / 100] / 1000.0;
++        p99_ms = kiki_gl_profile.intervals_us[(interval_count * 99 - 1) / 100] / 1000.0;
++    }
++    if (!profile_output) {
++        profile_output = stderr;
++    }
++    fprintf(profile_output,
++            "KIKI-QEMU-GL-PROFILE span=%.3fs flush=%u render=%u "
++            "fps=%.2f frame_p50=%.3fms frame_p95=%.3fms frame_p99=%.3fms "
++            "stalls33=%u stalls50=%u stalls100=%u idle_gaps=%u "
++            "draw_avg=%.3fms draw_max=%.3fms queue_avg=%.3fms\n",
++            elapsed_us / 1000000.0, kiki_gl_profile.flushes, kiki_gl_profile.renders,
++            kiki_gl_profile.renders * 1000000.0 / elapsed_us,
++            p50_ms, p95_ms, p99_ms,
++            kiki_gl_profile.stalls_33ms,
++            kiki_gl_profile.stalls_50ms,
++            kiki_gl_profile.stalls_100ms,
++            kiki_gl_profile.idle_gaps,
++            kiki_gl_profile.renders ?
++                kiki_gl_profile.draw_total_us / (1000.0 * kiki_gl_profile.renders) : 0.0,
++            kiki_gl_profile.draw_max_us / 1000.0,
++            kiki_gl_profile.queue_samples ?
++                kiki_gl_profile.queue_total_us / (1000.0 * kiki_gl_profile.queue_samples) : 0.0);
++    if (profile_output != stderr) {
++        fclose(profile_output);
++    }
++
++    kiki_gl_profile.period_start_us = now_us;
++    /* A scanout without a draw in this window must not leak its queue delay
++     * into the next fixed reporting window. */
++    kiki_gl_profile.last_flush_us = 0;
++    kiki_gl_profile.flushes = 0;
++    kiki_gl_profile.renders = 0;
++    kiki_gl_profile.queue_samples = 0;
++    kiki_gl_profile.interval_count = 0;
++    kiki_gl_profile.stalls_33ms = 0;
++    kiki_gl_profile.stalls_50ms = 0;
++    kiki_gl_profile.stalls_100ms = 0;
++    kiki_gl_profile.idle_gaps = 0;
++    kiki_gl_profile.draw_total_us = 0;
++    kiki_gl_profile.draw_max_us = 0;
++    kiki_gl_profile.queue_total_us = 0;
++    return G_SOURCE_CONTINUE;
++}
++
++static bool kiki_gl_profile_enabled(void)
++{
++    if (kiki_gl_profile.enabled < 0) {
++        kiki_gl_profile.enabled = g_strcmp0(g_getenv("KIKI_GPU_PROFILE"), "1") == 0;
++        if (kiki_gl_profile.enabled) {
++            kiki_gl_profile.period_start_us = g_get_monotonic_time();
++            g_timeout_add_seconds(5, kiki_gl_profile_report, NULL);
++        }
++    }
++    return kiki_gl_profile.enabled;
++}
++
+ static void gtk_gl_area_set_scanout_mode(VirtualConsole *vc, bool scanout)
+ {
+     if (vc->gfx.scanout_mode == scanout) {
+@@ -48,12 +247,43 @@ void gd_gl_area_draw(VirtualConsole *vc)
+     int ww_surface, wh_surface;
+     int fbw, fbh;
+     int wx_offset, wy_offset;
++    gint64 profile_start_us = 0;
++    uint64_t scanout_sequence = kiki_gl_scanout_sequence;
++
++    if (kiki_gl_profile_enabled()) {
++        profile_start_us = g_get_monotonic_time();
++        if (kiki_gl_profile.last_render_start_us) {
++            gint64 interval_us = profile_start_us - kiki_gl_profile.last_render_start_us;
++            if (kiki_gl_profile.interval_count < G_N_ELEMENTS(kiki_gl_profile.intervals_us)) {
++                kiki_gl_profile.intervals_us[kiki_gl_profile.interval_count++] = interval_us;
++            }
++            if (interval_us > G_USEC_PER_SEC) {
++                kiki_gl_profile.idle_gaps++;
++            } else {
++                kiki_gl_profile.stalls_33ms += interval_us > 33333;
++                kiki_gl_profile.stalls_50ms += interval_us > 50000;
++                kiki_gl_profile.stalls_100ms += interval_us > 100000;
++            }
++        }
++        kiki_gl_profile.last_render_start_us = profile_start_us;
++        if (kiki_gl_profile.last_flush_us) {
++            kiki_gl_profile.queue_total_us +=
++                profile_start_us - kiki_gl_profile.last_flush_us;
++            kiki_gl_profile.queue_samples++;
++            kiki_gl_profile.last_flush_us = 0;
++        }
++    }
+ 
+     if (!vc->gfx.gls || !vc->gfx.ds) {
+         return;
+     }
+ 
++    trace_kiki_gtk_draw_start(scanout_sequence);
++
+     gtk_gl_area_make_current(GTK_GL_AREA(vc->gfx.drawing_area));
++#ifdef G_OS_WIN32
++    kiki_gtk_wgl_swap_control();
++#endif
+     gs = gdk_window_get_scale_factor(gtk_widget_get_window(vc->gfx.drawing_area));
+     fbw = surface_width(vc->gfx.ds);
+     fbh = surface_height(vc->gfx.ds);
+@@ -77,12 +307,14 @@ void gd_gl_area_draw(VirtualConsole *vc)
+ 
+     if (vc->gfx.scanout_mode) {
+         if (!vc->gfx.guest_fb.framebuffer) {
++            trace_kiki_gtk_draw_end(scanout_sequence);
+             return;
+         }
+ 
+ #ifdef CONFIG_GBM
+         if (dmabuf) {
+             if (!vc->gfx.draw_submitted) {
++                trace_kiki_gtk_draw_end(scanout_sequence);
+                 return;
+             } else {
+                 vc->gfx.draw_submitted = false;
+@@ -135,6 +367,15 @@ void gd_gl_area_draw(VirtualConsole *vc)
+         surface_gl_setup_viewport(vc->gfx.gls, vc->gfx.ds, pw, ph);
+         surface_gl_render_texture(vc->gfx.gls, vc->gfx.ds);
+     }
++
++    if (profile_start_us) {
++        gint64 now_us = g_get_monotonic_time();
++        gint64 draw_us = now_us - profile_start_us;
++        kiki_gl_profile.renders++;
++        kiki_gl_profile.draw_total_us += draw_us;
++        kiki_gl_profile.draw_max_us = MAX(kiki_gl_profile.draw_max_us, draw_us);
++    }
++    trace_kiki_gtk_draw_end(scanout_sequence);
+ }
+ 
+ void gd_gl_area_update(DisplayChangeListener *dcl,
+@@ -318,6 +559,14 @@ void gd_gl_area_scanout_flush(DisplayChangeListener *dcl,
+                           uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+ {
+     VirtualConsole *vc = container_of(dcl, VirtualConsole, gfx.dcl);
++    uint64_t scanout_sequence = ++kiki_gl_scanout_sequence;
++
++    trace_kiki_gtk_scanout_flush(scanout_sequence, x, y, w, h);
++
++    if (kiki_gl_profile_enabled()) {
++        kiki_gl_profile.flushes++;
++        kiki_gl_profile.last_flush_us = g_get_monotonic_time();
++    }
+ 
+     if (vc->gfx.guest_fb.dmabuf && !vc->gfx.draw_submitted) {
+         vc->gfx.draw_submitted = true;
+diff --git a/ui/gtk.c b/ui/gtk.c
+index 46cbab2..a9faa91 100644
+--- a/ui/gtk.c
++++ b/ui/gtk.c
+@@ -44,6 +44,7 @@
+ #include "ui/gtk.h"
+ #ifdef G_OS_WIN32
+ #include <gdk/gdkwin32.h>
++#include <commctrl.h>
+ #endif
+ #include "ui/win32-kbd-hook.h"
+ 
+@@ -136,6 +137,14 @@ DECLARE_INSTANCE_CHECKER(VCChardev, VC_CHARDEV,
+ 
+ static struct touch_slot touch_slots[INPUT_EVENT_SLOTS_MAX];
+ 
++typedef struct {
++    GdkEventSequence *sequence;
++    bool active;
++} GtkTouchSequenceSlot;
++
++static GtkTouchSequenceSlot gtk_touch_sequences[INPUT_EVENT_SLOTS_MAX];
++static bool gtk_mouse_touch_down;
++
+ bool gtk_use_gl_area;
+ 
+ static void gd_grab_pointer(VirtualConsole *vc, const char *reason);
+@@ -288,6 +297,13 @@ static void gd_update_geometry_hints(VirtualConsole *vc)
+         double scale_y = s->free_scale ? VC_SCALE_MIN : vc->gfx.scale_y;
+         geo.min_width  = surface_width(vc->gfx.ds) * scale_x;
+         geo.min_height = surface_height(vc->gfx.ds) * scale_y;
++#ifdef G_OS_WIN32
++        if (g_strcmp0(g_getenv("KIKI_GTK_NATIVE_PIXELS"), "1") == 0) {
++            /* A large guest mode must not prevent shrinking back to a phone. */
++            geo.min_width = 200;
++            geo.min_height = 200;
++        }
++#endif
+         mask |= GDK_HINT_MIN_SIZE;
+         geo_widget = vc->gfx.drawing_area;
+         gtk_widget_set_size_request(geo_widget, geo.min_width, geo.min_height);
+@@ -342,6 +358,12 @@ void gd_update_windowsize(VirtualConsole *vc)
+     gd_update_geometry_hints(vc);
+ 
+     if (vc->type == GD_VC_GFX && !s->full_screen && !s->free_scale) {
++#ifdef G_OS_WIN32
++        if (g_strcmp0(g_getenv("KIKI_GTK_NATIVE_PIXELS"), "1") == 0) {
++            /* Preserve the host window while the guest display mode changes. */
++            return;
++        }
++#endif
+         gtk_window_resize(GTK_WINDOW(vc->window ? vc->window : s->window),
+                           VC_WINDOW_X_MIN, VC_WINDOW_Y_MIN);
+     }
+@@ -663,7 +685,7 @@ static const DisplayGLCtxOps gl_area_ctx_ops = {
+     .dpy_gl_ctx_make_current = gd_gl_area_make_current,
+ };
+ 
+-#ifdef CONFIG_X11
++#if defined(CONFIG_X11) || defined(G_OS_WIN32)
+ static const DisplayChangeListenerOps dcl_egl_ops = {
+     .dpy_name             = "gtk-egl",
+     .dpy_gfx_update       = gd_egl_update,
+@@ -776,6 +798,116 @@ static void gd_set_ui_size(VirtualConsole *vc, gint width, gint height)
+     qemu_console_set_ui_info(vc->gfx.dcl.con, &info, true);
+ }
+ 
++#ifdef G_OS_WIN32
++static void gd_native_resize_trace(const char *event, int width, int height,
++                                   int scale_factor)
++{
++    const char *path = g_getenv("KIKI_GTK_RESOLUTION_TRACE");
++    FILE *file;
++
++    if (!path) {
++        return;
++    }
++    file = fopen(path, "a");
++    if (!file) {
++        return;
++    }
++    fprintf(file, "time=%" G_GINT64_FORMAT
++            " native-resize=%s size=%d,%d scale=%d\n",
++            g_get_monotonic_time(), event, width, height, scale_factor);
++    fclose(file);
++}
++
++static gboolean gd_native_resize_commit_idle(gpointer opaque)
++{
++    GtkDisplayState *s = opaque;
++    int i;
++
++    s->native_resize_commit_source = 0;
++    for (i = 0; i < s->vcs->len; i++) {
++        VirtualConsole *vc = g_ptr_array_index(s->vcs, i);
++        GtkWidget *area;
++        int scale_factor;
++
++        if (vc->type != GD_VC_GFX ||
++            !qemu_console_is_graphic(vc->gfx.dcl.con)) {
++            continue;
++        }
++        area = vc->gfx.drawing_area;
++        scale_factor = MAX(gtk_widget_get_scale_factor(area), 1);
++        gd_native_resize_trace("commit",
++                               gtk_widget_get_allocated_width(area) * scale_factor,
++                               gtk_widget_get_allocated_height(area) * scale_factor,
++                               scale_factor);
++        gd_set_ui_size(vc,
++                       gtk_widget_get_allocated_width(area) * scale_factor,
++                       gtk_widget_get_allocated_height(area) * scale_factor);
++    }
++    return G_SOURCE_REMOVE;
++}
++
++static LRESULT CALLBACK gd_native_resize_subclass_proc(
++    HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
++    UINT_PTR subclass_id, DWORD_PTR ref_data)
++{
++    GtkDisplayState *s = (GtkDisplayState *)ref_data;
++
++    if (message == WM_ENTERSIZEMOVE) {
++        s->native_resize_active = true;
++        gd_native_resize_trace("begin", 0, 0, 0);
++    } else if (message == WM_EXITSIZEMOVE && s->native_resize_active) {
++        s->native_resize_active = false;
++        gd_native_resize_trace("end", 0, 0, 0);
++        if (s->native_resize_commit_source) {
++            g_source_remove(s->native_resize_commit_source);
++        }
++        /* Let GDK consume the final WM_SIZE/configure events before reading
++         * the drawing area's allocation and requesting one guest mode. */
++        s->native_resize_commit_source =
++            g_idle_add(gd_native_resize_commit_idle, s);
++    }
++
++    return DefSubclassProc(hwnd, message, wparam, lparam);
++}
++
++static void gd_native_resize_hook_install(GtkDisplayState *s)
++{
++    GdkWindow *window;
++    HWND hwnd;
++
++    if (g_strcmp0(g_getenv("KIKI_GTK_NATIVE_PIXELS"), "1") != 0 ||
++        !GDK_IS_WIN32_DISPLAY(gtk_widget_get_display(s->window))) {
++        return;
++    }
++
++    window = gtk_widget_get_window(s->window);
++    hwnd = window ? gdk_win32_window_get_impl_hwnd(window) : NULL;
++    if (!hwnd || !SetWindowSubclass(hwnd, gd_native_resize_subclass_proc,
++                                    (UINT_PTR)s, (DWORD_PTR)s)) {
++        warn_report("gtk: could not install native resize batching hook");
++        return;
++    }
++    s->native_resize_hooked = true;
++}
++
++static void gd_native_resize_hook_remove(GtkDisplayState *s)
++{
++    GdkWindow *window;
++    HWND hwnd;
++
++    if (!s->native_resize_hooked) {
++        return;
++    }
++    window = gtk_widget_get_window(s->window);
++    hwnd = window ? gdk_win32_window_get_impl_hwnd(window) : NULL;
++    if (hwnd) {
++        RemoveWindowSubclass(hwnd, gd_native_resize_subclass_proc,
++                             (UINT_PTR)s);
++    }
++    s->native_resize_hooked = false;
++}
++#endif
++
+ #if defined(CONFIG_OPENGL)
+ 
+ static gboolean gd_render_event(GtkGLArea *area, GdkGLContext *context,
+@@ -798,15 +930,23 @@ static void gd_resize_event(GtkGLArea *area,
+     GdkWindow *window = gtk_widget_get_window(GTK_WIDGET(area));
+     const int gs = gdk_window_get_scale_factor(window);
+ 
++    if (g_strcmp0(g_getenv("KIKI_GTK_NATIVE_PIXELS"), "1") == 0) {
++        /* GtkGLArea's resize signal is already in physical pixels.  The
++         * drawing scale depends on the previous guest framebuffer size;
++         * dividing by it here feeds an old mode back into UIInfo and can
++         * leave the guest at 2x the actual host client area after a drag. */
++#ifdef G_OS_WIN32
++        if (!vc->s->native_resize_active)
++#endif
++            gd_set_ui_size(vc, width, height);
++        return;
++    }
++
+     if (!vc->s->free_scale && !vc->s->full_screen) {
+         pw /= sx;
+         ph /= sy;
+     }
+ 
+-    /**
+-     * width and height here are in pixel coordinate, so we must divide it
+-     * by global window scale (gs)
+-     */
+     gd_set_ui_size(vc, pw / gs, ph / gs);
+ }
+ 
+@@ -816,7 +956,10 @@ void gd_update_monitor_refresh_rate(VirtualConsole *vc, GtkWidget *widget)
+ {
+ #ifdef GDK_VERSION_3_22
+     GdkWindow *win = gtk_widget_get_window(widget);
++    const char *guest_refresh_rate_env;
++    char *guest_refresh_rate_end;
+     int refresh_rate;
++    int guest_refresh_rate;
+ 
+     if (win) {
+         GdkDisplay *dpy = gtk_widget_get_display(widget);
+@@ -826,11 +969,31 @@ void gd_update_monitor_refresh_rate(VirtualConsole *vc, GtkWidget *widget)
+         refresh_rate = 0;
+     }
+ 
+-    gd_set_ui_refresh_rate(vc, refresh_rate);
++    /*
++     * GTK exposes the current Windows desktop cadence, which can be lower
++     * than a dynamic-refresh panel's peak. Allow the Surface launcher to
++     * configure the guest's virtual-display peak explicitly. Drive both the
++     * guest mode and QEMU's scanout polling from the same value so reporting
++     * 120 Hz does not leave the virtual display update loop capped at 60 Hz.
++     */
++    guest_refresh_rate = refresh_rate;
++    guest_refresh_rate_env =
++        g_getenv("KIKI_GTK_GUEST_REFRESH_RATE_HZ");
++    if (guest_refresh_rate_env && *guest_refresh_rate_env) {
++        gint64 guest_refresh_rate_hz =
++            g_ascii_strtoll(guest_refresh_rate_env,
++                            &guest_refresh_rate_end, 10);
++        if (guest_refresh_rate_end != guest_refresh_rate_env &&
++            !*guest_refresh_rate_end && guest_refresh_rate_hz >= 30 &&
++            guest_refresh_rate_hz <= 120) {
++            guest_refresh_rate = guest_refresh_rate_hz * 1000;
++        }
++    }
++    gd_set_ui_refresh_rate(vc, guest_refresh_rate);
+ 
+     /* T = 1 / f = 1 [s*Hz] / f = 1000*1000 [ms*mHz] / f */
+-    vc->gfx.dcl.update_interval = refresh_rate ?
+-        MIN(1000 * 1000 / refresh_rate, GUI_REFRESH_INTERVAL_DEFAULT) :
++    vc->gfx.dcl.update_interval = guest_refresh_rate ?
++        MIN(1000 * 1000 / guest_refresh_rate, GUI_REFRESH_INTERVAL_DEFAULT) :
+         GUI_REFRESH_INTERVAL_DEFAULT;
+ #endif
+ }
+@@ -922,6 +1085,50 @@ void gd_update_scale(VirtualConsole *vc, int ww, int wh, int fbw, int fbh)
+  * presentation of the guest content.
+  */
+ 
++static void gd_kiki_apply_native_scale(GtkWidget *widget, VirtualConsole *vc,
++                                       int ww_widget, int wh_widget,
++                                       int fbw, int fbh)
++{
++#ifdef G_OS_WIN32
++    int scale_factor, window_px_w, window_px_h, dw, dh;
++    double sx, sy, fit;
++
++    if (g_strcmp0(g_getenv("KIKI_GTK_NATIVE_PIXELS"), "1") != 0 ||
++        fbw <= 0 || fbh <= 0 || ww_widget <= 0 || wh_widget <= 0) {
++        return;
++    }
++
++    scale_factor = MAX(gtk_widget_get_scale_factor(widget), 1);
++    window_px_w = ww_widget * scale_factor;
++    window_px_h = wh_widget * scale_factor;
++    dw = fbw > window_px_w ? fbw - window_px_w : window_px_w - fbw;
++    dh = fbh > window_px_h ? fbh - window_px_h : window_px_h - fbh;
++    if (dw <= 2 && dh <= 2) {
++        vc->gfx.scale_x = 1.0 / scale_factor;
++        vc->gfx.scale_y = 1.0 / scale_factor;
++        return;
++    }
++
++    /*
++     * The host window and guest scanout disagree while a mode change is in
++     * flight. Fit the complete frame instead of clipping its top-left corner.
++     * Drawing returns to one guest pixel per host pixel once the sizes match.
++     */
++    sx = (double)ww_widget / fbw;
++    sy = (double)wh_widget / fbh;
++    fit = sx < sy ? sx : sy;
++    vc->gfx.scale_x = fit;
++    vc->gfx.scale_y = fit;
++#else
++    (void)widget;
++    (void)vc;
++    (void)ww_widget;
++    (void)wh_widget;
++    (void)fbw;
++    (void)fbh;
++#endif
++}
++
+ static gboolean gd_draw_event(GtkWidget *widget, cairo_t *cr, void *opaque)
+ {
+     VirtualConsole *vc = opaque;
+@@ -936,7 +1143,7 @@ static gboolean gd_draw_event(GtkWidget *widget, cairo_t *cr, void *opaque)
+             /* invoke render callback please */
+             return FALSE;
+         } else {
+-#ifdef CONFIG_X11
++#if defined(CONFIG_X11) || defined(G_OS_WIN32)
+             gd_egl_draw(vc);
+             return TRUE;
+ #else
+@@ -966,6 +1173,8 @@ static gboolean gd_draw_event(GtkWidget *widget, cairo_t *cr, void *opaque)
+ 
+     gd_update_scale(vc, ww_widget, wh_widget, fbw, fbh);
+ 
++    gd_kiki_apply_native_scale(widget, vc, ww_widget, wh_widget, fbw, fbh);
++
+     ww_surface = fbw * vc->gfx.scale_x;
+     wh_surface = fbh * vc->gfx.scale_y;
+ 
+@@ -997,32 +1206,40 @@ static gboolean gd_draw_event(GtkWidget *widget, cairo_t *cr, void *opaque)
+     return TRUE;
+ }
+ 
+-static gboolean gd_motion_event(GtkWidget *widget, GdkEventMotion *motion,
+-                                void *opaque)
++static void gd_widget_to_framebuffer(GtkWidget *widget, VirtualConsole *vc,
++                                    double x, double y,
++                                    double *fb_x, double *fb_y)
+ {
+-    VirtualConsole *vc = opaque;
+-    GtkDisplayState *s = vc->s;
+-    int fbx, fby;
+-    int wx_offset, wy_offset;
+-    int wh_surface, ww_surface;
++    int ww_surface, wh_surface;
+     int ww_widget, wh_widget;
++    int wx_offset = 0, wy_offset = 0;
++    int fbw = 0, fbh = 0;
++    GdkWindow *window;
+ 
+-    if (!vc->gfx.ds) {
+-        return TRUE;
++    /* Event positions and Cairo output are both GTK logical coordinates.
++     * Native-pixel mode expresses the DPI conversion in scale_x/scale_y. */
++    window = gtk_widget_get_window(widget);
++    if (window) {
++        ww_widget = gdk_window_get_width(window);
++        wh_widget = gdk_window_get_height(window);
++    } else {
++        ww_widget = gtk_widget_get_allocated_width(widget);
++        wh_widget = gtk_widget_get_allocated_height(widget);
++    }
++    if (vc->gfx.ds) {
++        fbw = surface_width(vc->gfx.ds);
++        fbh = surface_height(vc->gfx.ds);
++        gd_kiki_apply_native_scale(widget, vc, ww_widget, wh_widget, fbw, fbh);
++    }
++    if (!vc->gfx.ds || vc->gfx.scale_x == 0.0 || vc->gfx.scale_y == 0.0) {
++        *fb_x = x;
++        *fb_y = y;
++        return;
+     }
+ 
+     ww_surface = surface_width(vc->gfx.ds) * vc->gfx.scale_x;
+     wh_surface = surface_height(vc->gfx.ds) * vc->gfx.scale_y;
+-    ww_widget = gtk_widget_get_allocated_width(widget);
+-    wh_widget = gtk_widget_get_allocated_height(widget);
+ 
+-    /*
+-     * `widget` may not have the same size with the frame buffer.
+-     * In such cases, some paddings are needed around the `vc`.
+-     * To achieve that, `vc` will be displayed at (mx, my)
+-     * so that it is displayed at the center of the widget.
+-     */
+-    wx_offset = wy_offset = 0;
+     if (ww_widget > ww_surface) {
+         wx_offset = (ww_widget - ww_surface) / 2;
+     }
+@@ -1030,14 +1247,67 @@ static gboolean gd_motion_event(GtkWidget *widget, GdkEventMotion *motion,
+         wy_offset = (wh_widget - wh_surface) / 2;
+     }
+ 
+-    /*
+-     * `motion` is reported in `widget` coordinates
+-     * so translating it to the coordinates in `vc`.
+-     */
+-    fbx = (motion->x - wx_offset) / vc->gfx.scale_x;
+-    fby = (motion->y - wy_offset) / vc->gfx.scale_y;
++    *fb_x = (x - wx_offset) / vc->gfx.scale_x;
++    *fb_y = (y - wy_offset) / vc->gfx.scale_y;
++}
++
++static void gd_kiki_trace_pointer(GtkWidget *widget, VirtualConsole *vc,
++                                  const char *kind, double x, double y,
++                                  double root_x, double root_y,
++                                  double fb_x, double fb_y,
++                                  gboolean pointer_emulated)
++{
++    const char *path = g_getenv("KIKI_GTK_INPUT_TRACE");
++    GdkWindow *window;
++    FILE *file;
++    int origin_x = 0, origin_y = 0;
+ 
+-    trace_gd_motion_event(ww_widget, wh_widget,
++    if (!path || !vc->gfx.ds) {
++        return;
++    }
++    window = gtk_widget_get_window(widget);
++    if (window) {
++        gdk_window_get_origin(window, &origin_x, &origin_y);
++    }
++    file = fopen(path, "a");
++    if (!file) {
++        return;
++    }
++    fprintf(file,
++            "time=%" G_GINT64_FORMAT " kind=%s xy=%.2f,%.2f "
++            "root=%.2f,%.2f origin=%d,%d mapped=%.2f,%.2f "
++            "widget=%d,%d window=%d,%d factor=%d surface=%d,%d "
++            "scale=%.5f,%.5f pointer_emulated=%d\n",
++            g_get_monotonic_time(), kind, x, y, root_x, root_y,
++            origin_x, origin_y, fb_x, fb_y,
++            gtk_widget_get_allocated_width(widget),
++            gtk_widget_get_allocated_height(widget),
++            window ? gdk_window_get_width(window) : -1,
++            window ? gdk_window_get_height(window) : -1,
++            window ? gdk_window_get_scale_factor(window) : -1,
++            surface_width(vc->gfx.ds), surface_height(vc->gfx.ds),
++            vc->gfx.scale_x, vc->gfx.scale_y, pointer_emulated);
++    fclose(file);
++}
++
++static gboolean gd_motion_event(GtkWidget *widget, GdkEventMotion *motion,
++                                void *opaque)
++{
++    VirtualConsole *vc = opaque;
++    GtkDisplayState *s = vc->s;
++    double fb_x, fb_y;
++    int fbx, fby;
++
++    if (!vc->gfx.ds || vc->gfx.scale_x <= 0 || vc->gfx.scale_y <= 0) {
++        return TRUE;
++    }
++
++    gd_widget_to_framebuffer(widget, vc, motion->x, motion->y, &fb_x, &fb_y);
++    fbx = fb_x;
++    fby = fb_y;
++
++    trace_gd_motion_event(gtk_widget_get_allocated_width(widget),
++                          gtk_widget_get_allocated_height(widget),
+                           gtk_widget_get_scale_factor(widget), fbx, fby);
+ 
+     if (qemu_input_is_absolute(vc->gfx.dcl.con)) {
+@@ -1100,9 +1370,87 @@ static gboolean gd_button_event(GtkWidget *widget, GdkEventButton *button,
+     GtkDisplayState *s = vc->s;
+     InputButton btn;
+ 
++    if (button->button == 1 && vc->gfx.ds &&
++        vc->gfx.scale_x > 0 && vc->gfx.scale_y > 0) {
++        double fb_x, fb_y;
++        gd_widget_to_framebuffer(widget, vc, button->x, button->y,
++                                 &fb_x, &fb_y);
++        gd_kiki_trace_pointer(widget, vc,
++                              button->type == GDK_BUTTON_PRESS ?
++                              "mouse-down" : "mouse-up",
++                              button->x, button->y,
++                              button->x_root, button->y_root, fb_x, fb_y,
++                              gdk_event_get_pointer_emulated((GdkEvent *)button));
++    }
++
++    /* GTK/Win32 can report a Surface finger as a mouse click instead of a
++     * GDK_TOUCH event. Opt in only for KikiAOSP's touch-only experiment; the
++     * normal QEMU mouse path remains unchanged for other users. */
++    if (button->button == 1 &&
++        g_strcmp0(g_getenv("KIKI_GTK_MOUSE_AS_TOUCH"), "1") == 0) {
++        const int slot = INPUT_EVENT_SLOTS_MAX - 1;
++        double fb_x, fb_y;
++        Error *err = NULL;
++        int i;
++        bool active = false;
++
++        if (button->type == GDK_2BUTTON_PRESS ||
++            button->type == GDK_3BUTTON_PRESS || !vc->gfx.ds ||
++            vc->gfx.scale_x <= 0 || vc->gfx.scale_y <= 0) {
++            return TRUE;
++        }
++
++        if (button->type == GDK_BUTTON_PRESS) {
++            if (gtk_mouse_touch_down || touch_slots[slot].tracking_id != -1) {
++                return TRUE;
++            }
++            for (i = 0; i < INPUT_EVENT_SLOTS_MAX; i++) {
++                if (gtk_touch_sequences[i].active) {
++                    return TRUE; /* Native GDK_TOUCH already owns this finger. */
++                }
++            }
++            gd_widget_to_framebuffer(widget, vc, button->x, button->y,
++                                     &fb_x, &fb_y);
++            if (fb_x < 0 || fb_y < 0 ||
++                fb_x >= surface_width(vc->gfx.ds) ||
++                fb_y >= surface_height(vc->gfx.ds)) {
++                return TRUE;
++            }
++            qemu_input_touch_event(vc->gfx.dcl.con, touch_slots, slot,
++                                   surface_width(vc->gfx.ds),
++                                   surface_height(vc->gfx.ds), fb_x, fb_y,
++                                   INPUT_MULTI_TOUCH_TYPE_BEGIN, &err);
++            gtk_mouse_touch_down = !err;
++        } else if (button->type == GDK_BUTTON_RELEASE &&
++                   gtk_mouse_touch_down) {
++            qemu_input_touch_event(vc->gfx.dcl.con, touch_slots, slot,
++                                   surface_width(vc->gfx.ds),
++                                   surface_height(vc->gfx.ds),
++                                   touch_slots[slot].x, touch_slots[slot].y,
++                                   INPUT_MULTI_TOUCH_TYPE_END, &err);
++            gtk_mouse_touch_down = false;
++            for (i = 0; i < INPUT_EVENT_SLOTS_MAX; i++) {
++                if (touch_slots[i].tracking_id != -1) {
++                    active = true;
++                    break;
++                }
++            }
++            if (!active) {
++                qemu_input_queue_btn(vc->gfx.dcl.con,
++                                     INPUT_BUTTON_TOUCH, false);
++                qemu_input_event_sync();
++            }
++        }
++        if (err) {
++            warn_report_err(err);
++        }
++        return TRUE;
++    }
++
+     /* implicitly grab the input at the first click in the relative mode */
+     if (button->button == 1 && button->type == GDK_BUTTON_PRESS &&
+-        !qemu_input_is_absolute(vc->gfx.dcl.con) && s->ptr_owner != vc) {
++        !qemu_input_is_absolute(vc->gfx.dcl.con) && s->ptr_owner != vc &&
++        g_strcmp0(g_getenv("KIKI_GTK_TOUCH_FIRST"), "1") != 0) {
+         if (!vc->window) {
+             gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(s->grab_item),
+                                            TRUE);
+@@ -1201,13 +1549,42 @@ static gboolean gd_scroll_event(GtkWidget *widget, GdkEventScroll *scroll,
+ }
+ 
+ 
++static int gd_touch_sequence_find(GdkEventSequence *sequence)
++{
++    int i;
++
++    for (i = 0; i < INPUT_EVENT_SLOTS_MAX; i++) {
++        if (gtk_touch_sequences[i].active &&
++            gtk_touch_sequences[i].sequence == sequence) {
++            return i;
++        }
++    }
++    return -1;
++}
++
++static int gd_touch_sequence_alloc(GdkEventSequence *sequence)
++{
++    int i;
++
++    for (i = 0; i < INPUT_EVENT_SLOTS_MAX; i++) {
++        if (!gtk_touch_sequences[i].active) {
++            gtk_touch_sequences[i].sequence = sequence;
++            gtk_touch_sequences[i].active = true;
++            return i;
++        }
++    }
++    return -1;
++}
++
+ static gboolean gd_touch_event(GtkWidget *widget, GdkEventTouch *touch,
+                                void *opaque)
+ {
+     VirtualConsole *vc = opaque;
+     Error *err = NULL;
+-    uint64_t num_slot = GPOINTER_TO_UINT(touch->sequence);
+-    int type = -1;
++    double fb_x = 0, fb_y = 0;
++    int num_slot, type;
++    int i;
++    bool active = false;
+ 
+     switch (touch->type) {
+     case GDK_TOUCH_BEGIN:
+@@ -1225,12 +1602,80 @@ static gboolean gd_touch_event(GtkWidget *widget, GdkEventTouch *touch,
+         return FALSE;
+     }
+ 
+-    qemu_input_touch_event(vc->gfx.dcl.con, touch_slots,
+-                           num_slot, surface_width(vc->gfx.ds),
+-                           surface_height(vc->gfx.ds), touch->x,
+-                           touch->y, type, &err);
+-    if (err) {
+-        warn_report_err(err);
++    if (!vc->gfx.ds || vc->gfx.scale_x <= 0 || vc->gfx.scale_y <= 0) {
++        return TRUE;
++    }
++
++    num_slot = gd_touch_sequence_find(touch->sequence);
++    if (type == INPUT_MULTI_TOUCH_TYPE_BEGIN) {
++        gd_widget_to_framebuffer(widget, vc, touch->x, touch->y,
++                                 &fb_x, &fb_y);
++        if (num_slot < 0) {
++            num_slot = gd_touch_sequence_alloc(touch->sequence);
++            if (num_slot < 0) {
++                warn_report("gtk: no free multitouch slot for new sequence");
++                return TRUE;
++            }
++        }
++    } else if (num_slot < 0) {
++        /* Ignore updates and releases without a matching begin. */
++        return TRUE;
++    }
++
++    if (type == INPUT_MULTI_TOUCH_TYPE_BEGIN ||
++        type == INPUT_MULTI_TOUCH_TYPE_UPDATE) {
++        gd_widget_to_framebuffer(widget, vc, touch->x, touch->y,
++                                 &fb_x, &fb_y);
++        if (fb_x < 0 || fb_y < 0 ||
++            fb_x >= surface_width(vc->gfx.ds) ||
++            fb_y >= surface_height(vc->gfx.ds)) {
++            /* Keep tracking the host sequence; it may enter the image later. */
++            return TRUE;
++        }
++        if (type == INPUT_MULTI_TOUCH_TYPE_UPDATE &&
++            touch_slots[num_slot].tracking_id == -1) {
++            /* Promote an ignored letterbox begin when it enters the image. */
++            type = INPUT_MULTI_TOUCH_TYPE_BEGIN;
++        }
++    } else if (type == INPUT_MULTI_TOUCH_TYPE_END) {
++        /* qemu_input_touch_event() stores coordinates before processing END. */
++        fb_x = touch_slots[num_slot].x;
++        fb_y = touch_slots[num_slot].y;
++    }
++
++    if (type != INPUT_MULTI_TOUCH_TYPE_END ||
++        touch_slots[num_slot].tracking_id != -1) {
++        gd_kiki_trace_pointer(widget, vc,
++                              type == INPUT_MULTI_TOUCH_TYPE_BEGIN ?
++                              "touch-down" :
++                              type == INPUT_MULTI_TOUCH_TYPE_UPDATE ?
++                              "touch-move" : "touch-up",
++                              touch->x, touch->y,
++                              touch->x_root, touch->y_root, fb_x, fb_y,
++                              gdk_event_get_pointer_emulated((GdkEvent *)touch));
++        qemu_input_touch_event(vc->gfx.dcl.con, touch_slots,
++                               num_slot, surface_width(vc->gfx.ds),
++                               surface_height(vc->gfx.ds), fb_x, fb_y, type, &err);
++        if (err) {
++            warn_report_err(err);
++        }
++    }
++
++    if (type == INPUT_MULTI_TOUCH_TYPE_END) {
++        gtk_touch_sequences[num_slot].active = false;
++        gtk_touch_sequences[num_slot].sequence = NULL;
++        for (i = 0; i < INPUT_EVENT_SLOTS_MAX; i++) {
++            if (touch_slots[i].tracking_id != -1) {
++                active = true;
++                break;
++            }
++        }
++        if (!active) {
++            /* qemu_input_touch_event() sends BTN_TOUCH down on contact but
++             * leaves the matching final up event to the frontend. */
++            qemu_input_queue_btn(vc->gfx.dcl.con, INPUT_BUTTON_TOUCH, false);
++            qemu_input_event_sync();
++        }
+     }
+     return TRUE;
+ }
+@@ -1976,12 +2421,43 @@ static gboolean gd_configure(GtkWidget *widget,
+     VirtualConsole *vc = opaque;
+     const double sx = vc->gfx.scale_x, sy = vc->gfx.scale_y;
+     double width = cfg->width, height = cfg->height;
+-
+-    if (!vc->s->free_scale && !vc->s->full_screen) {
++    const char *trace_path = g_getenv("KIKI_GTK_RESOLUTION_TRACE");
++    GdkWindow *window = gtk_widget_get_window(widget);
++    int scale_factor = window ? gdk_window_get_scale_factor(window) : 1;
++
++    if (g_strcmp0(g_getenv("KIKI_GTK_NATIVE_PIXELS"), "1") == 0) {
++        /* GTK reports logical units; UIInfo is defined in guest/physical
++         * pixels.  Do this conversion directly and independently of the
++         * Cairo drawing scale to avoid feeding the inverse DPI scale back
++         * into the requested guest mode. */
++        width *= scale_factor;
++        height *= scale_factor;
++    } else if (!vc->s->free_scale && !vc->s->full_screen) {
+         width /= sx;
+         height /= sy;
+     }
+ 
++    if (trace_path) {
++        FILE *file = fopen(trace_path, "a");
++        if (file) {
++            fprintf(file, "time=%" G_GINT64_FORMAT
++                    " configure=%d,%d requested=%.0f,%.0f scale=%d"
++                    " framebuffer=%d,%d zoom=%.3f,%.3f free=%d fullscreen=%d\n",
++                    g_get_monotonic_time(), cfg->width, cfg->height,
++                    width, height, scale_factor,
++                    vc->gfx.ds ? surface_width(vc->gfx.ds) : 0,
++                    vc->gfx.ds ? surface_height(vc->gfx.ds) : 0,
++                    sx, sy, vc->s->free_scale, vc->s->full_screen);
++            fclose(file);
++        }
++    }
++    if (g_strcmp0(g_getenv("KIKI_GTK_NATIVE_PIXELS"), "1") == 0) {
++#ifdef G_OS_WIN32
++        if (vc->s->native_resize_active) {
++            return FALSE;
++        }
++#endif
++    }
+     gd_set_ui_size(vc, width, height);
+ 
+     return FALSE;
+@@ -2404,7 +2880,17 @@ static GtkWidget *gd_create_menu_machine(GtkDisplayState *s)
+ static void gl_area_realize(GtkGLArea *area, VirtualConsole *vc)
+ {
+     gtk_gl_area_make_current(area);
+-    qemu_egl_display = eglGetCurrentDisplay();
++#if defined(GDK_WINDOWING_WIN32)
++    if (GDK_IS_WIN32_DISPLAY(gdk_display_get_default())) {
++        /* GtkGLArea uses WGL here. No EGL entry points are current, and
++         * libepoxy may jump through a NULL EGL dispatch pointer. VirGL can
++         * use the GDK GL context callbacks without an EGL display. */
++        qemu_egl_display = EGL_NO_DISPLAY;
++    } else
++#endif
++    {
++        qemu_egl_display = eglGetCurrentDisplay();
++    }
+     vc->gfx.has_dmabuf = qemu_egl_has_dmabuf();
+     if (!vc->gfx.has_dmabuf) {
+         error_report("GtkGLArea console lacks DMABUF support.");
+@@ -2449,7 +2935,7 @@ add_gfx_console(GtkDisplayState *s, QemuConsole *con)
+             ops = &dcl_gl_area_ops;
+             vc->gfx.dgc.ops = &gl_area_ctx_ops;
+         } else {
+-#ifdef CONFIG_X11
++#if defined(CONFIG_X11) || defined(G_OS_WIN32)
+             vc->gfx.drawing_area = gtk_drawing_area_new();
+             /*
+              * gtk_widget_set_double_buffered() was deprecated in 3.14.
+@@ -2649,12 +3135,14 @@ static void gd_create_menu_view(GtkDisplayState *s, DisplayOptions *opts)
+             break;
+         }
+         add_gfx_console(s, con);
+-        if (qemu_console_ui_info_supported(con)) {
++        if (qemu_console_ui_info_supported(con) &&
++            g_strcmp0(g_getenv("KIKI_GTK_NATIVE_PIXELS"), "1") != 0) {
+             zoom_to_fit = true;
+         }
+     }
+ 
+-    if (s->opts->u.gtk.has_zoom_to_fit) {
++    if (s->opts->u.gtk.has_zoom_to_fit &&
++        g_strcmp0(g_getenv("KIKI_GTK_NATIVE_PIXELS"), "1") != 0) {
+         zoom_to_fit = s->opts->u.gtk.zoom_to_fit;
+     }
+     if (zoom_to_fit) {
+@@ -2670,6 +3158,8 @@ static void gd_create_menu_view(GtkDisplayState *s, DisplayOptions *opts)
+     for (i = 0; i < INPUT_EVENT_SLOTS_MAX; i++) {
+         struct touch_slot *slot = &touch_slots[i];
+         slot->tracking_id = -1;
++        gtk_touch_sequences[i].sequence = NULL;
++        gtk_touch_sequences[i].active = false;
+     }
+ 
+ #if defined(CONFIG_VTE)
+@@ -2858,6 +3348,24 @@ static void gtk_display_init(DisplayState *ds, DisplayOptions *opts)
+ 
+     gtk_widget_show_all(s->window);
+ 
++#ifdef G_OS_WIN32
++    if (g_strcmp0(g_getenv("KIKI_GTK_NATIVE_PIXELS"), "1") == 0) {
++        gd_native_resize_hook_install(s);
++        const char *start_width = g_getenv("KIKI_GTK_START_WIDTH");
++        const char *start_height = g_getenv("KIKI_GTK_START_HEIGHT");
++        GdkMonitor *monitor = gdk_display_get_primary_monitor(window_display);
++        int scale = monitor ? gdk_monitor_get_scale_factor(monitor) : 1;
++        int width = start_width ? atoi(start_width) : 0;
++        int height = start_height ? atoi(start_height) : 0;
++
++        if (width >= 400 && height >= 400) {
++            /* Override the initial guest-sized resize after the window maps. */
++            gtk_window_resize(GTK_WINDOW(s->window),
++                              width / MAX(scale, 1), height / MAX(scale, 1));
++        }
++    }
++#endif
++
+     for (idx = 0; idx < s->vcs->len; idx++) {
+         VirtualConsole *v = g_ptr_array_index(s->vcs, idx);
+         if (v->type == GD_VC_GFX) {
+@@ -2936,8 +3444,13 @@ static void early_gtk_display_init(DisplayOptions *opts)
+ #endif
+ #if defined(GDK_WINDOWING_WIN32)
+         if (GDK_IS_WIN32_DISPLAY(gdk_display_get_default())) {
+-            gtk_use_gl_area = true;
+-            gtk_gl_area_init();
++            if (g_strcmp0(g_getenv("KIKI_GTK_ANGLE_EGL"), "1") == 0) {
++                DisplayGLMode mode = opts->has_gl ? opts->gl : DISPLAY_GL_MODE_ES;
++                gtk_egl_init(mode);
++            } else {
++                gtk_use_gl_area = true;
++                gtk_gl_area_init();
++            }
+         } else
+ #endif
+         {
+@@ -2963,6 +3476,13 @@ static void gtk_display_cleanup(void)
+     if (!s) {
+         return;
+     }
++#ifdef G_OS_WIN32
++    if (s->native_resize_commit_source) {
++        g_source_remove(s->native_resize_commit_source);
++        s->native_resize_commit_source = 0;
++    }
++    gd_native_resize_hook_remove(s);
++#endif
+     qemu_del_vm_change_state_handler(s->vmse);
+     qemu_console_remove_notifier(&s->console_notifier);
+     qemu_remove_mouse_mode_change_notifier(&s->mouse_mode_notifier);
+diff --git a/ui/meson.build b/ui/meson.build
+index 39829a2..a283f78 100644
+--- a/ui/meson.build
++++ b/ui/meson.build
+@@ -159,7 +159,11 @@ if gtk.found()
+   gtk_ss.add(files('gtk-clipboard.c'))
+   gtk_ss.add(when: x11, if_true: files('x_keymap.c'))
+   gtk_ss.add(when: opengl, if_true: files('gtk-gl-area.c'))
+-  gtk_ss.add(when: [x11, opengl], if_true: files('gtk-egl.c'))
++  if host_os == 'windows'
++    gtk_ss.add(when: opengl, if_true: files('gtk-egl.c'))
++  else
++    gtk_ss.add(when: [x11, opengl], if_true: files('gtk-egl.c'))
++  endif
+   ui_modules += {'gtk' : gtk_ss}
+ endif
+ 
+diff --git a/ui/sdl2-gl.c b/ui/sdl2-gl.c
+index f41fc8b..f82bbf1 100644
+--- a/ui/sdl2-gl.c
++++ b/ui/sdl2-gl.c
+@@ -32,6 +32,139 @@
+ #include "ui/input.h"
+ #include "ui/sdl2.h"
+ 
++typedef struct KikiSdlProfile {
++    bool checked;
++    FILE *file;
++    gint64 period_start_us;
++    gint64 last_swap_us;
++    guint swaps;
++    guint interval_samples;
++    guint stalls_33ms;
++    guint stalls_50ms;
++    guint stalls_100ms;
++    guint idle_gaps;
++    guint64 callback_total_us;
++    guint64 callback_max_us;
++    guint64 blit_total_us;
++    guint64 blit_max_us;
++    guint64 swap_total_us;
++    guint64 swap_max_us;
++    guint64 interval_total_us;
++    guint64 interval_max_us;
++} KikiSdlProfile;
++
++static KikiSdlProfile kiki_sdl_profile;
++
++static FILE *kiki_sdl_profile_file(void)
++{
++    const char *path;
++
++    if (!kiki_sdl_profile.checked) {
++        kiki_sdl_profile.checked = true;
++        path = g_getenv("KIKI_SDL_PROFILE_PATH");
++        if (path && *path) {
++            kiki_sdl_profile.file = fopen(path, "a");
++            if (kiki_sdl_profile.file) {
++                kiki_sdl_profile.period_start_us = g_get_monotonic_time();
++            }
++        }
++    }
++
++    return kiki_sdl_profile.file;
++}
++
++static void kiki_sdl_profile_record(gint64 callback_start_us,
++                                    gint64 blit_start_us,
++                                    gint64 swap_start_us,
++                                    gint64 swap_end_us)
++{
++    KikiSdlProfile *profile = &kiki_sdl_profile;
++    gint64 interval_us;
++    guint64 callback_us;
++    guint64 blit_us;
++    guint64 swap_us;
++    gint64 now_us = swap_end_us;
++    double span_s;
++
++    if (!kiki_sdl_profile_file()) {
++        return;
++    }
++
++    callback_us = swap_end_us - callback_start_us;
++    blit_us = swap_start_us - blit_start_us;
++    swap_us = swap_end_us - swap_start_us;
++    profile->swaps++;
++    profile->callback_total_us += callback_us;
++    profile->callback_max_us = MAX(profile->callback_max_us, callback_us);
++    profile->blit_total_us += blit_us;
++    profile->blit_max_us = MAX(profile->blit_max_us, blit_us);
++    profile->swap_total_us += swap_us;
++    profile->swap_max_us = MAX(profile->swap_max_us, swap_us);
++
++    if (profile->last_swap_us) {
++        interval_us = now_us - profile->last_swap_us;
++        if (interval_us > G_USEC_PER_SEC) {
++            profile->idle_gaps++;
++        } else {
++            profile->interval_samples++;
++            profile->interval_total_us += interval_us;
++            profile->interval_max_us = MAX(profile->interval_max_us,
++                                           interval_us);
++            profile->stalls_33ms += interval_us > 33333;
++            profile->stalls_50ms += interval_us > 50000;
++            profile->stalls_100ms += interval_us > 100000;
++        }
++    }
++    profile->last_swap_us = now_us;
++
++    span_s = (now_us - profile->period_start_us) / (double)G_USEC_PER_SEC;
++    if (span_s < 5.0) {
++        return;
++    }
++
++    fprintf(profile->file,
++            "KIKI-QEMU-SDL-PROFILE span=%.3fs flush=%u swaps=%u "
++            "fps=%.2f swap_interval=%d frame_avg=%.3fms frame_max=%.3fms "
++            "stalls33=%u stalls50=%u stalls100=%u idle_gaps=%u "
++            "callback_avg=%.3fms callback_max=%.3fms "
++            "blit_avg=%.3fms blit_max=%.3fms "
++            "swap_avg=%.3fms swap_max=%.3fms\n",
++            span_s, profile->swaps, profile->swaps,
++            profile->swaps / span_s, SDL_GL_GetSwapInterval(),
++            profile->interval_samples ?
++                profile->interval_total_us / 1000.0 /
++                    profile->interval_samples : 0.0,
++            profile->interval_max_us / 1000.0,
++            profile->stalls_33ms, profile->stalls_50ms,
++            profile->stalls_100ms, profile->idle_gaps,
++            profile->swaps ? profile->callback_total_us / 1000.0 /
++                    profile->swaps : 0.0,
++            profile->callback_max_us / 1000.0,
++            profile->swaps ? profile->blit_total_us / 1000.0 /
++                    profile->swaps : 0.0,
++            profile->blit_max_us / 1000.0,
++            profile->swaps ? profile->swap_total_us / 1000.0 /
++                    profile->swaps : 0.0,
++            profile->swap_max_us / 1000.0);
++    fflush(profile->file);
++
++    profile->period_start_us = now_us;
++    profile->swaps = 0;
++    profile->interval_samples = 0;
++    profile->stalls_33ms = 0;
++    profile->stalls_50ms = 0;
++    profile->stalls_100ms = 0;
++    profile->idle_gaps = 0;
++    profile->callback_total_us = 0;
++    profile->callback_max_us = 0;
++    profile->blit_total_us = 0;
++    profile->blit_max_us = 0;
++    profile->swap_total_us = 0;
++    profile->swap_max_us = 0;
++    profile->interval_total_us = 0;
++    profile->interval_max_us = 0;
++}
++
+ static void sdl2_set_scanout_mode(struct sdl2_console *scon, bool scanout)
+ {
+     if (scon->scanout_mode == scanout) {
+@@ -54,7 +187,7 @@ static void sdl2_gl_render_surface(struct sdl2_console *scon)
+ 
+     SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
+ 
+-    SDL_GetWindowSize(scon->real_window, &ww, &wh);
++    SDL_GL_GetDrawableSize(scon->real_window, &ww, &wh);
+     surface_gl_setup_viewport(scon->gls, scon->surface, ww, wh);
+ 
+     surface_gl_render_texture(scon->gls, scon->surface);
+@@ -236,6 +369,10 @@ void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
+ {
+     struct sdl2_console *scon = container_of(dcl, struct sdl2_console, dcl);
+     int ww, wh;
++    gint64 callback_start_us = 0;
++    gint64 blit_start_us;
++    gint64 swap_start_us;
++    bool profile = kiki_sdl_profile_file() != NULL;
+ 
+     assert(scon->opengl);
+     if (!scon->scanout_mode) {
+@@ -245,13 +382,22 @@ void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
+         return;
+     }
+ 
++    if (profile) {
++        callback_start_us = g_get_monotonic_time();
++    }
+     SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
+ 
+-    SDL_GetWindowSize(scon->real_window, &ww, &wh);
++    SDL_GL_GetDrawableSize(scon->real_window, &ww, &wh);
+     egl_fb_setup_default(&scon->win_fb, ww, wh, 0, 0);
++    blit_start_us = profile ? g_get_monotonic_time() : 0;
+     egl_fb_blit(&scon->win_fb, &scon->guest_fb, !scon->y0_top);
+ 
++    swap_start_us = profile ? g_get_monotonic_time() : 0;
+     SDL_GL_SwapWindow(scon->real_window);
++    if (profile) {
++        kiki_sdl_profile_record(callback_start_us, blit_start_us,
++                                swap_start_us, g_get_monotonic_time());
++    }
+ }
+ 
+ #ifdef CONFIG_GBM
+diff --git a/ui/sdl2.c b/ui/sdl2.c
+index 1c97d23..9458cc5 100644
+--- a/ui/sdl2.c
++++ b/ui/sdl2.c
+@@ -41,6 +41,10 @@
+ 
+ static int sdl2_num_outputs;
+ static struct sdl2_console *sdl2_console;
++static bool sdl2_disable_mouse_grab;
++#if defined(CONFIG_WIN32)
++static bool sdl2_disable_host_ime;
++#endif
+ 
+ static SDL_Surface *guest_sprite_surface;
+ static int gui_grab; /* if true, all keyboard/mouse events are grabbed */
+@@ -58,6 +62,362 @@ static int guest_x, guest_y;
+ static SDL_Cursor *guest_sprite;
+ static Notifier mouse_mode_notifier;
+ 
++#if defined(CONFIG_WIN32)
++static FILE *sdl2_touch_trace;
++static bool sdl2_touch_trace_checked;
++static bool sdl2_raw_keyboard_trace_enabled;
++
++static void sdl2_touch_trace_event(const char *event, HWND hwnd,
++                                  UINT32 pointer_id, int slot,
++                                  LONG x, LONG y, const char *detail)
++{
++    const char *path;
++
++    if (!sdl2_touch_trace_checked) {
++        sdl2_touch_trace_checked = true;
++        path = g_getenv("KIKI_SDL_INPUT_TRACE");
++        if (path && *path) {
++            sdl2_touch_trace = fopen(path, "a");
++        }
++    }
++    if (sdl2_touch_trace) {
++        fprintf(sdl2_touch_trace,
++                "t=%" PRIu32 " event=%s hwnd=%p pointer=%" PRIu32
++                " slot=%d x=%ld y=%ld %s\n",
++                SDL_GetTicks(), event, hwnd, pointer_id, slot,
++                x, y, detail ? detail : "");
++        fflush(sdl2_touch_trace);
++    }
++}
++
++static void sdl2_disable_window_ime(SDL_Window *window)
++{
++    typedef BOOL (WINAPI *ImmAssociateContextExFunc)(HWND, HANDLE, DWORD);
++    SDL_SysWMinfo info;
++    HMODULE imm32;
++    ImmAssociateContextExFunc associate;
++
++    if (!sdl2_disable_host_ime || !window) {
++        return;
++    }
++    memset(&info, 0, sizeof(info));
++    SDL_VERSION(&info.version);
++    if (!SDL_GetWindowWMInfo(window, &info) ||
++        info.subsystem != SDL_SYSWM_WINDOWS) {
++        return;
++    }
++    imm32 = LoadLibraryW(L"imm32.dll");
++    if (!imm32) {
++        sdl2_touch_trace_event("IME_DISABLE_FAILED", info.info.win.window,
++                               0, -1, 0, GetLastError(),
++                               "could not load imm32.dll");
++        return;
++    }
++    associate = (ImmAssociateContextExFunc)GetProcAddress(
++        imm32, "ImmAssociateContextEx");
++    if (!associate || !associate(info.info.win.window, NULL, 0)) {
++        sdl2_touch_trace_event("IME_DISABLE_FAILED", info.info.win.window,
++                               0, -1, 0, GetLastError(),
++                               "ImmAssociateContextEx failed");
++    } else {
++        sdl2_touch_trace_event("IME_DISABLED", info.info.win.window,
++                               0, -1, 0, 0,
++                               "host IME detached for physical key events");
++    }
++    FreeLibrary(imm32);
++}
++
++static int sdl2_raw_keyboard_event_watch(void *opaque, SDL_Event *event)
++{
++    SDL_SysWMmsg *sysmsg;
++    RAWINPUT input;
++    UINT size = sizeof(input);
++    UINT result;
++    RAWKEYBOARD *key;
++    char detail[96];
++
++    if (event->type == SDL_KEYDOWN || event->type == SDL_KEYUP) {
++        snprintf(detail, sizeof(detail),
++                 "window=%u scancode=%d keycode=%d mod=0x%x repeat=%u",
++                 event->key.windowID, event->key.keysym.scancode,
++                 event->key.keysym.sym, event->key.keysym.mod,
++                 event->key.repeat);
++        sdl2_touch_trace_event(event->type == SDL_KEYDOWN ? "SDL_KEYDOWN" :
++                               "SDL_KEYUP", NULL,
++                               event->key.keysym.sym, -1,
++                               event->key.keysym.scancode,
++                               event->key.keysym.mod, detail);
++        return 1;
++    }
++    if (event->type != SDL_SYSWMEVENT || !event->syswm.msg) {
++        return 1;
++    }
++    sysmsg = event->syswm.msg;
++    if (sysmsg->subsystem != SDL_SYSWM_WINDOWS) {
++        return 1;
++    }
++    if (sysmsg->msg.win.msg == WM_KEYDOWN ||
++        sysmsg->msg.win.msg == WM_KEYUP ||
++        sysmsg->msg.win.msg == WM_SYSKEYDOWN ||
++        sysmsg->msg.win.msg == WM_SYSKEYUP) {
++        snprintf(detail, sizeof(detail), "message=0x%04x vkey=0x%02x lparam=0x%08lx",
++                 sysmsg->msg.win.msg, (unsigned int)sysmsg->msg.win.wParam,
++                 (unsigned long)sysmsg->msg.win.lParam);
++        sdl2_touch_trace_event("WIN_KEY_MESSAGE", sysmsg->msg.win.hwnd,
++                               (UINT32)sysmsg->msg.win.wParam, -1,
++                               (LONG)sysmsg->msg.win.msg,
++                               (LONG)sysmsg->msg.win.lParam, detail);
++        return 1;
++    }
++    if (sysmsg->msg.win.msg == WM_IME_STARTCOMPOSITION ||
++        sysmsg->msg.win.msg == WM_IME_COMPOSITION ||
++        sysmsg->msg.win.msg == WM_IME_ENDCOMPOSITION ||
++        sysmsg->msg.win.msg == WM_IME_KEYDOWN ||
++        sysmsg->msg.win.msg == WM_CHAR ||
++        sysmsg->msg.win.msg == WM_UNICHAR) {
++        snprintf(detail, sizeof(detail), "message=0x%04x wparam=0x%08lx",
++                 sysmsg->msg.win.msg,
++                 (unsigned long)sysmsg->msg.win.wParam);
++        sdl2_touch_trace_event("WIN_IME_OR_CHAR_MESSAGE",
++                               sysmsg->msg.win.hwnd, 0, -1,
++                               (LONG)sysmsg->msg.win.msg,
++                               (LONG)sysmsg->msg.win.wParam, detail);
++        return 1;
++    }
++    if (sysmsg->msg.win.msg != WM_INPUT) {
++        return 1;
++    }
++
++    memset(&input, 0, sizeof(input));
++    result = GetRawInputData((HRAWINPUT)sysmsg->msg.win.lParam, RID_INPUT,
++                             &input, &size, sizeof(RAWINPUTHEADER));
++    if (result == (UINT)-1 || result < sizeof(RAWINPUTHEADER) ||
++        input.header.dwType != RIM_TYPEKEYBOARD) {
++        sdl2_touch_trace_event("WM_INPUT_READ_FAILED", sysmsg->msg.win.hwnd,
++                               0, -1, 0, 0,
++                               "raw keyboard data unavailable");
++        return 1;
++    }
++
++    key = &input.data.keyboard;
++    snprintf(detail, sizeof(detail), "vkey=0x%02x make=0x%02x flags=0x%04x %s",
++             key->VKey, key->MakeCode, key->Flags,
++             (key->Flags & RI_KEY_BREAK) ? "up" : "down");
++    sdl2_touch_trace_event("WM_INPUT_KEY", sysmsg->msg.win.hwnd,
++                           key->VKey, -1, key->MakeCode, key->Flags, detail);
++    return 1;
++}
++
++static void sdl2_enable_raw_keyboard_trace(void)
++{
++    RAWINPUTDEVICE device = {
++        .usUsagePage = 0x01,
++        .usUsage = 0x06,
++        .dwFlags = 0,
++        .hwndTarget = NULL,
++    };
++
++    if (g_strcmp0(g_getenv("KIKI_SDL_RAW_KEYBOARD_TRACE"), "1") != 0) {
++        return;
++    }
++    if (!RegisterRawInputDevices(&device, 1, sizeof(device))) {
++        sdl2_touch_trace_event("RAW_KEYBOARD_REGISTER_FAILED", NULL, 0,
++                               -1, 0, GetLastError(),
++                               "RegisterRawInputDevices failed");
++        return;
++    }
++    SDL_AddEventWatch(sdl2_raw_keyboard_event_watch, NULL);
++    sdl2_raw_keyboard_trace_enabled = true;
++}
++
++static struct sdl2_console *get_scon_from_hwnd(HWND hwnd)
++{
++    int i;
++
++    for (i = 0; i < sdl2_num_outputs; i++) {
++        SDL_SysWMinfo info;
++
++        if (!sdl2_console[i].real_window) {
++            continue;
++        }
++        memset(&info, 0, sizeof(info));
++        SDL_VERSION(&info.version);
++        if (SDL_GetWindowWMInfo(sdl2_console[i].real_window, &info) &&
++            info.subsystem == SDL_SYSWM_WINDOWS &&
++            info.info.win.window == hwnd) {
++            return &sdl2_console[i];
++        }
++    }
++    return NULL;
++}
++
++static int sdl2_touch_slot_for_pointer(struct sdl2_console *scon,
++                                       UINT32 pointer_id, bool allocate)
++{
++    int i;
++    int free_slot = -1;
++
++    for (i = 0; i < INPUT_EVENT_SLOTS_MAX; i++) {
++        if (scon->touch_pointer_ids[i] == pointer_id) {
++            return i;
++        }
++        if (!scon->touch_pointer_ids[i] && free_slot < 0) {
++            free_slot = i;
++        }
++    }
++    if (allocate && free_slot >= 0) {
++        scon->touch_pointer_ids[free_slot] = pointer_id;
++        return free_slot;
++    }
++    return -1;
++}
++
++static void sdl2_end_pointer_touch(struct sdl2_console *scon, int slot,
++                                   HWND hwnd, UINT32 pointer_id,
++                                   const char *event)
++{
++    Error *err = NULL;
++    int i;
++    bool any_active = false;
++
++    if (slot < 0 || slot >= INPUT_EVENT_SLOTS_MAX ||
++        scon->touch_slots[slot].tracking_id == -1) {
++        return;
++    }
++
++    qemu_input_touch_event(scon->dcl.con, scon->touch_slots, slot,
++                           surface_width(scon->surface),
++                           surface_height(scon->surface),
++                           scon->touch_slots[slot].x,
++                           scon->touch_slots[slot].y,
++                           INPUT_MULTI_TOUCH_TYPE_END, &err);
++    if (err) {
++        warn_report_err(err);
++    }
++    scon->touch_pointer_ids[slot] = 0;
++    for (i = 0; i < INPUT_EVENT_SLOTS_MAX; i++) {
++        if (scon->touch_slots[i].tracking_id != -1) {
++            any_active = true;
++            break;
++        }
++    }
++    if (!any_active) {
++        qemu_input_queue_btn(scon->dcl.con, INPUT_BUTTON_TOUCH, false);
++        qemu_input_event_sync();
++    }
++    scon->touch_mouse_suppress_until = SDL_GetTicks() + 120;
++    sdl2_touch_trace_event(event, hwnd, pointer_id, slot,
++                           scon->touch_slots[slot].x,
++                           scon->touch_slots[slot].y, "end");
++}
++
++static bool sdl2_handle_windows_pointer(SDL_SysWMmsg *sysmsg)
++{
++    struct sdl2_console *scon;
++    POINTER_TOUCH_INFO touch_info;
++    POINTER_INPUT_TYPE pointer_type;
++    HWND hwnd;
++    UINT32 pointer_id;
++    UINT message;
++    int slot;
++    int drawable_w, drawable_h;
++    int x, y;
++    InputMultiTouchType type;
++    POINT point;
++    Error *err = NULL;
++
++    if (!sysmsg || sysmsg->subsystem != SDL_SYSWM_WINDOWS) {
++        return false;
++    }
++    hwnd = sysmsg->msg.win.hwnd;
++    message = sysmsg->msg.win.msg;
++    if (message != WM_POINTERDOWN && message != WM_POINTERUPDATE &&
++        message != WM_POINTERUP && message != WM_POINTERCAPTURECHANGED) {
++        return false;
++    }
++    pointer_id = GET_POINTERID_WPARAM(sysmsg->msg.win.wParam);
++    scon = get_scon_from_hwnd(hwnd);
++    if (!scon || !qemu_console_is_graphic(scon->dcl.con)) {
++        return true;
++    }
++    slot = sdl2_touch_slot_for_pointer(scon, pointer_id, false);
++
++    if (message == WM_POINTERCAPTURECHANGED) {
++        sdl2_end_pointer_touch(scon, slot, hwnd, pointer_id,
++                               "WM_POINTERCAPTURECHANGED");
++        return true;
++    }
++    if (message == WM_POINTERUP) {
++        sdl2_end_pointer_touch(scon, slot, hwnd, pointer_id,
++                               "WM_POINTERUP");
++        return true;
++    }
++    if (!GetPointerType(pointer_id, &pointer_type) ||
++        pointer_type != PT_TOUCH ||
++        !GetPointerTouchInfo(pointer_id, &touch_info)) {
++        sdl2_touch_trace_event("pointer-ignored", hwnd, pointer_id, slot,
++                               0, 0, "not-touch-or-no-touch-info");
++        return true;
++    }
++
++    if (message == WM_POINTERDOWN) {
++        if (slot < 0) {
++            slot = sdl2_touch_slot_for_pointer(scon, pointer_id, true);
++        }
++        type = INPUT_MULTI_TOUCH_TYPE_BEGIN;
++    } else if (message == WM_POINTERUPDATE) {
++        if (slot < 0) {
++            return true;
++        }
++        type = INPUT_MULTI_TOUCH_TYPE_UPDATE;
++    }
++    if (slot < 0) {
++        sdl2_touch_trace_event("pointer-dropped", hwnd, pointer_id, slot,
++                               0, 0, "touch-slot-limit");
++        return true;
++    }
++
++    point = touch_info.pointerInfo.ptPixelLocation;
++    if (!ScreenToClient(hwnd, &point)) {
++        sdl2_touch_trace_event("pointer-error", hwnd, pointer_id, slot,
++                               point.x, point.y, "ScreenToClient-failed");
++        return true;
++    }
++    SDL_GL_GetDrawableSize(scon->real_window, &drawable_w, &drawable_h);
++    if (drawable_w <= 0 || drawable_h <= 0 ||
++        surface_width(scon->surface) <= 0 ||
++        surface_height(scon->surface) <= 0) {
++        return true;
++    }
++    x = (int64_t)point.x * surface_width(scon->surface) / drawable_w;
++    y = (int64_t)point.y * surface_height(scon->surface) / drawable_h;
++    x = CLAMP(x, 0, surface_width(scon->surface) - 1);
++    y = CLAMP(y, 0, surface_height(scon->surface) - 1);
++
++    qemu_input_touch_event(scon->dcl.con, scon->touch_slots, slot,
++                           surface_width(scon->surface),
++                           surface_height(scon->surface), x, y, type, &err);
++    if (err) {
++        warn_report_err(err);
++    }
++    scon->touch_mouse_suppress_until = SDL_GetTicks() + 120;
++    sdl2_touch_trace_event(message == WM_POINTERDOWN ? "WM_POINTERDOWN" :
++                           "WM_POINTERUPDATE", hwnd, pointer_id, slot,
++                           x, y, "touch-forwarded");
++    return true;
++}
++
++static bool sdl2_suppress_synthetic_touch_mouse(struct sdl2_console *scon,
++                                                Uint32 which)
++{
++    if (which == SDL_TOUCH_MOUSEID) {
++        return true;
++    }
++    return scon->touch_mouse_suppress_until &&
++        (Sint32)(scon->touch_mouse_suppress_until - SDL_GetTicks()) > 0;
++}
++#endif
++
+ #define SDL2_REFRESH_INTERVAL_BUSY 10
+ #define SDL2_MAX_IDLE_COUNT (2 * GUI_REFRESH_INTERVAL_DEFAULT \
+                              / SDL2_REFRESH_INTERVAL_BUSY + 1)
+@@ -83,6 +443,7 @@ static struct sdl2_console *get_scon_from_window(uint32_t window_id)
+ void sdl2_window_create(struct sdl2_console *scon)
+ {
+     int flags = 0;
++    int width, height;
+ 
+     if (!scon->surface) {
+         return;
+@@ -100,14 +461,42 @@ void sdl2_window_create(struct sdl2_console *scon)
+ #ifdef CONFIG_OPENGL
+     if (scon->opengl) {
+         flags |= SDL_WINDOW_OPENGL;
++#if defined(CONFIG_WIN32)
++        /* Keep the GL drawable in physical display pixels on HiDPI Windows. */
++        flags |= SDL_WINDOW_ALLOW_HIGHDPI;
++#endif
+     }
+ #endif
+ 
++    width = surface_width(scon->surface);
++    height = surface_height(scon->surface);
++#if defined(CONFIG_WIN32)
++    if (g_strcmp0(g_getenv("KIKI_SDL_NATIVE_PIXELS"), "1") == 0) {
++        const char *start_width = g_getenv("KIKI_SDL_START_WIDTH");
++        const char *start_height = g_getenv("KIKI_SDL_START_HEIGHT");
++        char *width_end = NULL;
++        char *height_end = NULL;
++        gint64 native_width = start_width ?
++            g_ascii_strtoll(start_width, &width_end, 10) : 0;
++        gint64 native_height = start_height ?
++            g_ascii_strtoll(start_height, &height_end, 10) : 0;
++
++        if (start_width && start_height && width_end != start_width &&
++            height_end != start_height && !*width_end && !*height_end &&
++            native_width >= 400 && native_width <= 8192 &&
++            native_height >= 400 && native_height <= 8192) {
++            width = native_width;
++            height = native_height;
++        }
++    }
++#endif
+     scon->real_window = SDL_CreateWindow("", SDL_WINDOWPOS_UNDEFINED,
+                                          SDL_WINDOWPOS_UNDEFINED,
+-                                         surface_width(scon->surface),
+-                                         surface_height(scon->surface),
++                                         width, height,
+                                          flags);
++#if defined(CONFIG_WIN32)
++    sdl2_disable_window_ime(scon->real_window);
++#endif
+     if (scon->opengl) {
+         const char *driver = "opengl";
+ 
+@@ -121,10 +510,28 @@ void sdl2_window_create(struct sdl2_console *scon)
+         SDL_SetHint(SDL_HINT_RENDER_BATCHING, "1");
+ 
+         scon->winctx = SDL_GL_CreateContext(scon->real_window);
+-        SDL_GL_SetSwapInterval(0);
++        {
++            const char *swap_interval_env =
++                g_getenv("KIKI_SDL_SWAP_INTERVAL");
++            int swap_interval = 0;
++
++            if (swap_interval_env &&
++                (g_strcmp0(swap_interval_env, "0") == 0 ||
++                 g_strcmp0(swap_interval_env, "1") == 0)) {
++                swap_interval = swap_interval_env[0] - '0';
++            }
++            SDL_GL_SetSwapInterval(swap_interval);
++        }
+ 
+ #ifdef CONFIG_OPENGL
++#if defined(CONFIG_WIN32)
++        /* SDL desktop OpenGL uses WGL on Windows, not EGL. Calling
++         * eglGetCurrentDisplay() here can crash through an unset EGL
++         * dispatch table, so expose no EGL display to VirGL. */
++        qemu_egl_display = EGL_NO_DISPLAY;
++#else
+         qemu_egl_display = eglGetCurrentDisplay();
++#endif
+ #endif
+     } else {
+         /* The SDL renderer is only used by sdl2-2D, when OpenGL is disabled */
+@@ -163,6 +570,43 @@ void sdl2_window_resize(struct sdl2_console *scon)
+                       surface_height(scon->surface));
+ }
+ 
++static void sdl2_update_ui_info(struct sdl2_console *scon, bool delay)
++{
++    QemuUIInfo info;
++    int width, height;
++    const char *refresh_env;
++    int refresh_rate = 0;
++
++    if (!scon->real_window ||
++        !qemu_console_ui_info_supported(scon->dcl.con)) {
++        return;
++    }
++
++    SDL_GetWindowSize(scon->real_window, &width, &height);
++#ifdef CONFIG_OPENGL
++    if (scon->opengl) {
++        SDL_GL_GetDrawableSize(scon->real_window, &width, &height);
++    }
++#endif
++
++    refresh_env = g_getenv("KIKI_SDL_GUEST_REFRESH_RATE_HZ");
++    if (refresh_env && *refresh_env) {
++        char *end = NULL;
++        gint64 refresh_hz = g_ascii_strtoll(refresh_env, &end, 10);
++
++        if (end != refresh_env && !*end &&
++            refresh_hz >= 30 && refresh_hz <= 120) {
++            refresh_rate = refresh_hz * 1000;
++        }
++    }
++
++    info = *qemu_console_get_ui_info(scon->dcl.con);
++    info.width = width;
++    info.height = height;
++    info.refresh_rate = refresh_rate;
++    qemu_console_set_ui_info(scon->dcl.con, &info, delay);
++}
++
+ static void sdl2_redraw(struct sdl2_console *scon)
+ {
+     if (scon->opengl) {
+@@ -182,7 +626,7 @@ static void sdl_update_caption(struct sdl2_console *scon)
+ 
+     if (!runstate_is_running()) {
+         status = " [Stopped]";
+-    } else if (gui_grab) {
++    } else if (gui_grab && !sdl2_disable_mouse_grab) {
+         if (alt_grab) {
+ #ifdef CONFIG_DARWIN
+             status = " - Press ⌃⌥⇧G to exit grab";
+@@ -252,6 +696,9 @@ static void sdl_grab_start(struct sdl2_console *scon)
+ {
+     QemuConsole *con = scon ? scon->dcl.con : NULL;
+ 
++    if (sdl2_disable_mouse_grab) {
++        return;
++    }
+     if (!con || !qemu_console_is_graphic(con)) {
+         return;
+     }
+@@ -464,7 +911,8 @@ static void handle_keydown(SDL_Event *ev)
+             break;
+         }
+     }
+-    if (!scon->gui_keysym) {
++    /* Keep repeat timing in the guest; do not stack Windows/SDL repeats. */
++    if (!scon->gui_keysym && !ev->key.repeat) {
+         sdl2_process_key(scon, &ev->key);
+     }
+ }
+@@ -504,6 +952,11 @@ static void handle_mousemotion(SDL_Event *ev)
+     if (!scon || !qemu_console_is_graphic(scon->dcl.con)) {
+         return;
+     }
++#if defined(CONFIG_WIN32)
++    if (sdl2_suppress_synthetic_touch_mouse(scon, ev->motion.which)) {
++        return;
++    }
++#endif
+ 
+     SDL_GetWindowSize(scon->real_window, &scr_w, &scr_h);
+     if (qemu_input_is_absolute(scon->dcl.con) || absolute_enabled) {
+@@ -541,6 +994,11 @@ static void handle_mousebutton(SDL_Event *ev)
+     if (!scon || !qemu_console_is_graphic(scon->dcl.con)) {
+         return;
+     }
++#if defined(CONFIG_WIN32)
++    if (sdl2_suppress_synthetic_touch_mouse(scon, ev->button.which)) {
++        return;
++    }
++#endif
+ 
+     bev = &ev->button;
+     SDL_GetWindowSize(scon->real_window, &scr_w, &scr_h);
+@@ -571,6 +1029,11 @@ static void handle_mousewheel(SDL_Event *ev)
+     if (!scon || !qemu_console_is_graphic(scon->dcl.con)) {
+         return;
+     }
++#if defined(CONFIG_WIN32)
++    if (sdl2_suppress_synthetic_touch_mouse(scon, ev->wheel.which)) {
++        return;
++    }
++#endif
+ 
+     if (wev->y > 0) {
+         btn = INPUT_BUTTON_WHEEL_UP;
+@@ -602,11 +1065,7 @@ static void handle_windowevent(SDL_Event *ev)
+     switch (ev->window.event) {
+     case SDL_WINDOWEVENT_RESIZED:
+         {
+-            QemuUIInfo info = {
+-                .width = ev->window.data1,
+-                .height = ev->window.data2,
+-            };
+-            qemu_console_set_ui_info(scon->dcl.con, &info, true);
++            sdl2_update_ui_info(scon, true);
+         }
+         sdl2_redraw(scon);
+         break;
+@@ -614,6 +1073,10 @@ static void handle_windowevent(SDL_Event *ev)
+         sdl2_redraw(scon);
+         break;
+     case SDL_WINDOWEVENT_FOCUS_GAINED:
++#if defined(CONFIG_WIN32)
++        /* Windows may reassociate the active host IME after focus changes. */
++        sdl2_disable_window_ime(scon->real_window);
++#endif
+         /* fall through */
+     case SDL_WINDOWEVENT_ENTER:
+         if (!gui_grab && (qemu_input_is_absolute(scon->dcl.con) || absolute_enabled)) {
+@@ -675,6 +1138,23 @@ void sdl2_poll_events(struct sdl2_console *scon)
+ 
+     while (SDL_PollEvent(ev)) {
+         switch (ev->type) {
++#if defined(CONFIG_WIN32)
++        case SDL_SYSWMEVENT:
++            if (ev->syswm.msg &&
++                ev->syswm.msg->subsystem == SDL_SYSWM_WINDOWS &&
++                ev->syswm.msg->msg.win.msg == WM_INPUTLANGCHANGE) {
++                struct sdl2_console *wscon =
++                    get_scon_from_hwnd(ev->syswm.msg->msg.win.hwnd);
++
++                if (wscon) {
++                    sdl2_disable_window_ime(wscon->real_window);
++                }
++            }
++            if (sdl2_handle_windows_pointer(ev->syswm.msg)) {
++                idle = 0;
++            }
++            break;
++#endif
+         case SDL_KEYDOWN:
+             idle = 0;
+             handle_keydown(ev);
+@@ -796,6 +1276,21 @@ static void sdl_cleanup(void)
+         return;
+     }
+ 
++#if defined(CONFIG_WIN32)
++    if (sdl2_raw_keyboard_trace_enabled) {
++        RAWINPUTDEVICE device = {
++            .usUsagePage = 0x01,
++            .usUsage = 0x06,
++            .dwFlags = RIDEV_REMOVE,
++            .hwndTarget = NULL,
++        };
++
++        SDL_DelEventWatch(sdl2_raw_keyboard_event_watch, NULL);
++        RegisterRawInputDevices(&device, 1, sizeof(device));
++        sdl2_raw_keyboard_trace_enabled = false;
++    }
++#endif
++
+     qemu_remove_mouse_mode_change_notifier(&mouse_mode_notifier);
+ 
+     for (i = 0; i < sdl2_num_outputs; i++) {
+@@ -912,15 +1407,31 @@ static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
+         SDL_LogSetAllPriority(SDL_LOG_PRIORITY_VERBOSE);
+     }
+ 
++#if defined(CONFIG_WIN32)
++    sdl2_disable_mouse_grab =
++        g_strcmp0(g_getenv("KIKI_SDL_DISABLE_GRAB"), "1") == 0;
++    sdl2_disable_host_ime =
++        g_strcmp0(g_getenv("KIKI_SDL_DISABLE_IME"), "1") == 0;
++    if (g_strcmp0(g_getenv("KIKI_SDL_NATIVE_PIXELS"), "1") == 0) {
++        /* Disable Windows bitmap virtualization before SDL initializes video. */
++        SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
++    }
++#endif
+     if (SDL_Init(SDL_INIT_VIDEO)) {
+         fprintf(stderr, "Could not initialize SDL(%s) - exiting\n",
+                 SDL_GetError());
+         exit(1);
+     }
++#if defined(CONFIG_WIN32)
++    /* SDL2 does not translate Windows WM_POINTER contacts into touch events. */
++    SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
++    sdl2_enable_raw_keyboard_trace();
++#endif
+ #ifdef SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR /* only available since SDL 2.0.8 */
+     SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
+ #endif
+-    SDL_SetHint(SDL_HINT_GRAB_KEYBOARD, "1");
++    SDL_SetHint(SDL_HINT_GRAB_KEYBOARD,
++                sdl2_disable_mouse_grab ? "0" : "1");
+ #ifdef SDL_HINT_ALLOW_ALT_TAB_WHILE_GRABBED
+     SDL_SetHint(SDL_HINT_ALLOW_ALT_TAB_WHILE_GRABBED, "0");
+ #endif
+@@ -955,6 +1466,11 @@ static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
+         QemuConsole *con = qemu_console_lookup_by_index(i);
+         const DisplayChangeListenerOps *ops = &dcl_2d_ops;
+         assert(con != NULL);
++#if defined(CONFIG_WIN32)
++        for (int slot = 0; slot < INPUT_EVENT_SLOTS_MAX; slot++) {
++            sdl2_console[i].touch_slots[slot].tracking_id = -1;
++        }
++#endif
+         if (!qemu_console_is_graphic(con) &&
+             qemu_console_get_index(con) != 0) {
+             sdl2_console[i].hidden = true;
+@@ -976,6 +1492,12 @@ static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
+         }
+ #endif
+         qemu_console_register_listener(con, &sdl2_console[i].dcl, ops);
++#if defined(CONFIG_WIN32)
++        if (g_strcmp0(g_getenv("KIKI_SDL_NATIVE_PIXELS"), "1") == 0) {
++            /* The first SDL resize event is not guaranteed to arrive. */
++            sdl2_update_ui_info(&sdl2_console[i], false);
++        }
++#endif
+ #if defined(SDL_VIDEO_DRIVER_WINDOWS) || defined(SDL_VIDEO_DRIVER_X11)
+         if (SDL_GetWindowWMInfo(sdl2_console[i].real_window, &info)) {
+ #if defined(SDL_VIDEO_DRIVER_WINDOWS)
+diff --git a/ui/trace-events b/ui/trace-events
+index 339a61f..07a2537 100644
+--- a/ui/trace-events
++++ b/ui/trace-events
+@@ -19,6 +19,9 @@ ppm_save(int fd, void *image) "fd=%d image=%p"
+ 
+ # gtk-egl.c
+ # gtk-gl-area.c
++kiki_gtk_scanout_flush(uint64_t seq, uint32_t x, uint32_t y, uint32_t w, uint32_t h) "seq=%" PRIu64 " rect=%u,%u %ux%u"
++kiki_gtk_draw_start(uint64_t seq) "seq=%" PRIu64
++kiki_gtk_draw_end(uint64_t seq) "seq=%" PRIu64
+ # gtk.c
+ gd_switch(const char *tab, int width, int height) "tab=%s, width=%d, height=%d"
+ gd_update(const char *tab, int x, int y, int w, int h) "tab=%s, x=%d, y=%d, w=%d, h=%d"
