@@ -105,7 +105,7 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH  # 仅当前开发终端，�
 
 导出器只接受新目录，收集本次构建的 ARM64 EXE、静态导入的 DLL 依赖链和 ROM，记录哈希，并检查导出结果不再依赖 MSYS2 DLL 目录。`DependencyBin` 只是**构建导出输入**，不是用户启动时的 fallback。目录检查不启动虚拟机，也不安装程序、改注册表或修改用户实例。
 
-当前检查工具是开发阶段产物，不是发布版 CLI；静态补丁标记/PE/DLL 检查不能代替 GPT 启动 ABI、动态加载模块、宿主 OpenGL/Mesa D3D12 → Adreno 和完整系统实测。完整稳定补丁、启动控制台补丁与磁盘工具补丁均已追踪；正式版标题/隔离能力与新磁盘 ABI 仍在实现，完成后会同步更新构建补丁，不能把这次导出直接称作已验收发布版。
+当前检查工具是内部开发工具，不是用户验收入口；静态补丁标记/PE/DLL 检查不能代替 GPT 启动 ABI、动态加载模块、宿主 OpenGL/Mesa D3D12 → Adreno 和完整系统实测。发行配方现已额外应用 [通道标题补丁](patches/qemu-sdl-channel-title.patch)：正式版设置 `KIKI_SDL_WINDOW_TITLE=KikiEmu`，无该环境变量时保留开发标题行为。配置管理器要求这个编译能力标记，所以必须在**新目录**按当前四份补丁完整构建、导出，不要把旧开发 EXE 直接绑定为发行运行库。最新原生重建已通过目录/离线磁盘检查，真实发行系统及并行隔离验收仍未完成。
 
 发行启动将只使用实例保存的规范化 QEMU 路径及已验证文件身份；缺失、不兼容或文件变化时给出英文错误，不搜索 PATH、不回退到旧开发 EXE、不自动换成软件渲染。正式和 Dev 使用独立 bin/output 目录。KikiEmu 卸载不删除用户提供的 QEMU 或用户磁盘。
 
@@ -115,11 +115,11 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH  # 仅当前开发终端，�
 
 `src/kikiemu` 已包含原生 ARM64 参数/运行目录检查、受限子进程、GPT/动态 QCOW2 安装、boot-v4 缓存、安全 storage 删除、精确进程/端点核验、原子实例记录和失败恢复事务。发布分支新增共用 schema/语义检查、受限 ZIP 读取器及管理器分发：create 安装模块，list、set、info、doctor 和 `--delete --force --id` 已接入；缺少显式删除意图时底层接口同样拒绝。只设置内存/CPU 保留其他已设资源值，QEMU 路径检查失败不提交部分配置。
 
-内部检查只使用新建 TEMP fixtures 和自建测试子进程，不运行公开 CLI 的用户验收、不安装 setup.exe、不改用户 PATH 或真实 Android 数据。控制台管理器和无终端桌面 supervisor 已可编译为 ARM64，并接入 start/stop/logs；运行管理的真实系统回归、完整中断创建恢复、干净发行包、setup.exe 和正式/Dev 并行系统验收仍未完成，不能把开发组件当作已交付产品。`kikiemu-disk-prototype.exe` 仍是只供开发者测试**系统磁盘**的入口。
+内部检查只使用新建 TEMP fixtures 和自建测试子进程，不运行公开 CLI 的用户验收、不安装 setup.exe、不改用户 PATH 或真实 Android 数据。控制台管理器和无终端桌面 supervisor 已可编译为 ARM64，并接入 start/stop/logs；setup.exe 也已成功编译为候选安装包，配方见 [INSTALLER.md](INSTALLER.md)，但未执行/安装。运行管理的真实系统回归、完整中断创建恢复、干净发行包、用户安装器验收和正式/Dev 并行系统验收仍未完成，不能把候选当作已验收发行。`kikiemu-disk-prototype.exe` 仍是只供开发者测试**系统磁盘**的入口。
 
 运行管理源码为每次启动建立独立会话 UUID、ADB/QMP/相机回环端口和日志目录；进程先暂停创建、登记精确身份后才执行。正式窗口标题为 `KikiEmu`，开发计划为 `QEMU/Dev`，控制和删除不依赖标题。私有 ADB wire 直接连登记的客机，不使用全局 5037 服务、默认设备或宿主 ADB key；单次命令接口为 `kikiemu adb --id 01 --shell "getprop ro.serialno"`，暂不提供交互式 shell。原生启动配方沿用 SDL/VirGL/120 Hz、8 CPU/4 GiB、1003×1556、不 Grab 的基线，不对宿主显示/键盘/音频设定作修改。
 
-强制删除已额外验证运行中的 supervisor 持有真实 storage lease 的情况：只读核验和锁定原目录身份，停止该实例后才升级删除权限；替换路径或未释放锁仍拒绝。241 项内部检查包括进程/端口隔离、私有 shell-v2 的分段数据/校验/超时/错误身份和持锁实例删除；公开安装器/CLI 的最终用户验收仍由用户执行。
+强制删除已额外验证运行中的 supervisor 持有真实 storage lease 的情况：只读核验和锁定原目录身份，停止该实例后才升级删除权限；替换路径或未释放锁仍拒绝。251 项内部检查包括进程/端口隔离、私有 shell-v2 的分段数据/校验/超时/错误身份和持锁实例删除，并新增安装运行期互斥、完整 PATH 精确分段/去重/长度检查。所有安装入口持有 `install.lock` 共享 lease，setup/卸载必须先取得独占 lease，不能覆盖运行中的启动器，也不自动杀实例；卸载保留实例记录与磁盘。公开安装器/CLI 的最终用户验收仍由用户执行。
 
 共用合同从设备仓库 commit `5cfd0a94c1b267661d2ae96bdc3875365ad686cf` 固定引入，见 [PIN.json](src/kikiemu/contracts/PIN.json)；构建时核对三个 JSON 文件的 SHA-256，再嵌入本机程序。ZIP/ZIP64 只允许规定文件、store/deflate、普通文件及一致的 local/central 名称；拒绝 SFX、重复/截断/NUL/路径跳转、隐藏附加文件、未知角色、开发身份或错误 ABI。长度、哈希、AOSP XML 精确项目提交、4K ARM64 boot/gzip 和 raw EROFS 再作语义核验，禁止执行包内代码。这里的测试 ZIP 是明确标记的非可启动假数据，绝不是用户需要的系统包。
 
