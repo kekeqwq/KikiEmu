@@ -112,7 +112,9 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH  # 仅当前开发终端，�
 
 `src/kikiemu` 已包含原生 ARM64 参数/运行目录检查、受限子进程、GPT 规划、按需增长 QCOW2 安装及 boot-v4 缓存提取模块。内部库测试65项通过。`kikiemu-disk-prototype.exe` 只供开发者测试**系统磁盘**，不写管理器注册表、不安装 setup.exe、不启动虚拟机；它不是已交付的 `kikiemu create`。
 
-32 GiB 原型磁盘启动前约占1.16 GiB；GPT、boot/system/vendor 逐块读回校验及 QCOW2 检查通过，没有 backing file 或旧 userdata。首次系统启动发现上游 init 的 boot UUID 分类漏掉 virtio-blk，已在设备仓库追踪最小修补并重建。修正后单盘实际启动进入 SDL/VirGL/120Hz 桌面，剩余容量首次格式化为 F2FS，跨正常关机/重启的数据标记保持不变。但 Settings 的上游手机档位取整把32 GiB误报成64 GB、进而误算系统占用约31 GB；KikiAOSP专用真实块盘容量补丁已追踪，候选正在构建，UI容量验收尚未通过。不能把底层容量正确当作用户可见存储页面正确，也不能把开发原型当作干净发行包。
+32 GiB 原型磁盘启动前约占1.16 GiB；GPT、boot/system/vendor 逐块读回校验及 QCOW2 检查通过，没有 backing file 或旧 userdata。首次系统启动发现上游 init 的 boot UUID 分类漏掉 virtio-blk，已在设备仓库追踪最小修补并重建。修正后单盘实际启动进入 SDL/VirGL/120Hz 桌面，剩余容量首次格式化为 F2FS，跨正常关机/重启的数据标记保持不变。
+
+2026-10-01修复并实测容量显示：KikiAOSP专用开关让StorageManager/StorageStats采用完整块盘真实字节数，绕过实体手机营销容量档位；设置页也不再虚构最少1 GiB临时文件。新建32与200 GiB磁盘均实测API一致、F2FS实际容量正确，宿主QCOW2文件初次启动后约1.29 GB（十进制），没有预分配全部容量。32 GiB设置页为34 GB总计/约1.8 GB已用，Android17约1.3 GB、临时文件约518 MB；200 GiB为215 GB总计/约2.6 GB已用，Android17仍约1.3 GB。差别来自GB/GiB换算和实际文件系统开销，不是写死系统占用。数据和启动测试的具体边界见设备仓库[GPT存储验证记录](https://github.com/kekeqwq/kikiaosp_test/blob/feat/release-0_1-alpha/docs/GPT_STORAGE_PROTOTYPE.md)。这些仍是开发系统原型，不是干净发行包或公开CLI/安装器验收。
 
 `tools/check_gpt_guest_storage.ps1` 是只读系统检查工具：必须显式指定 QEMU PID/EXE/实例路径，核对进程创建身份与 ADB端点所有权后，比较GPT记录、内核完整盘容量、vold及StorageStats两个接口、F2FS容量；不修改用户数据，不调用用户CLI初始化。真实Settings页面与持久化仍需分别观察。
 
