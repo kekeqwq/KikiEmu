@@ -28,6 +28,12 @@ licenses, verifies ARM64 imports, and records source/payload/setup hashes.
 Internal tests, synthetic ZIPs, QEMU, Android images/disks and developer logs
 are not installer payloads.
 
+NSIS filename warning 9000 is explicitly acknowledged for the user's required
+`setup.exe` name: Windows may apply filename-based compatibility shims. Only
+this warning is exempted; all others fail the build. The installer requires
+Windows 11 ARM64 and never requests elevation, changes host shim/security
+settings or disguises itself under a different public filename.
+
 `installer/kikiemu.nsi` uses a fixed current-user application directory, no
 elevation and English text. Every installed entry point holds a shared read
 lease on `install.lock` for its entire lifetime; setup/uninstall requires an

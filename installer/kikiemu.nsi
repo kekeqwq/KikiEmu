@@ -1,5 +1,10 @@
 ; SPDX-License-Identifier: GPL-2.0-or-later
 Unicode true
+; The requested public filename is setup.exe. NSIS warns (9000) that Windows
+; may apply filename-based installer compatibility shims. This one explicitly
+; documented filename warning is accepted; all OTHER warnings remain errors.
+; No elevation, host shim settings, security bypass or filename disguise.
+!pragma warning disable 9000
 !include MUI2.nsh
 !include LogicLib.nsh
 !include x64.nsh

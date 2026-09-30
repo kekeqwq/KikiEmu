@@ -48,6 +48,9 @@ foreach ($dependency in $dependencies) {
 $lz4 = Join-Path $licenseRoot 'lz4'
 New-Item -ItemType Directory -Path $lz4 | Out-Null
 Copy-Item -LiteralPath (Join-Path $prefix 'include/lz4.h') -Destination $lz4
+$nsisLicense = Join-Path $licenseRoot 'nsis'
+New-Item -ItemType Directory -Path $nsisLicense | Out-Null
+Copy-Item -LiteralPath (Join-Path $nsis 'COPYING') -Destination $nsisLicense
 # All of these paths were compiler-enumerated from a NEW payload tree, never
 # a caller-selected instance. No wildcard/recursive storage deletion script.
 $uninstall = @()
