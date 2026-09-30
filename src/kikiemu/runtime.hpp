@@ -10,6 +10,9 @@ struct PeInfo {
 };
 PeInfo inspect_pe(const fs::path& file);
 std::string sha256(const fs::path& file);
+// Product-owned JSON must not silently accept shadowed/duplicate object keys.
+// Callers bound the input length and validate the specific schema afterward.
+nlohmann::json parse_json_document(const std::string& text);
 
 // Default inspection accepts dependencies ONLY beside the configured EXEs
 // or from Windows system DLLs. Additional sources are BUILD EXPORT inputs,

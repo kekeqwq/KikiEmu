@@ -79,9 +79,12 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH
 ```powershell
 kikiemu create --system ~/Downloads/KikiAOSP-0.1.0-alpha-arm64.zip --storage ~/MyAndroid --size 200g --qemu ~/Tools/KikiQemu/bin
 kikiemu set --id 01 --qemu ~/Tools/KikiQemu-v2/bin
+kikiemu --delete --force --id 01
 ```
 
 也接受 `kikiemu --create ...`、`kikiemu --set ...`。`create` 的 system/storage/size/qemu 四项必填；`--performance` 可选。`g` 表示 GiB；size 为手机总容量，创建后禁止修改。`--qemu` 指 **bin 目录**，不是 EXE 文件；该目录至少包含 `qemu-system-aarch64.exe`、`qemu-img.exe`、`qemu-io.exe`、配套第三方 DLL 和 `roms/`。兼容的路径变更不重装系统、不改用户磁盘，运行中的实例保持原配置，下次启动生效。
+
+删除接口为 `kikiemu --delete --force --id 01`，也接受 `kikiemu delete --force --id 01`。它不再询问确认：核验目标实例和 storage 所有权后，终止仅属于该实例的 QEMU/配套进程，永久删除其 storage 文件夹及全部数据；若为默认实例，同时清除默认设置。必须显式提供 ID 和 `--force`，不允许传入任意删除路径；路径/实例/进程身份不符时拒绝，不会清理其他实例、原始 ZIP 或用户提供的 QEMU。卸载启动器仍默认保留用户系统数据。完整事务与安全约束见 [发行规划](RELEASE_PLAN.md#explicit-destructive-instance-deletion)；该接口随管理器交付，当前不宣称 setup.exe 或公开 CLI 已完成。
 
 从上面 CLANGARM64 环境按仓库固定提交/补丁构建到新的目录，避免覆盖已经绑定给正式实例的运行库：
 
@@ -110,7 +113,7 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH  # 仅当前开发终端，�
 
 ### 内部单盘系统原型（不是用户验收入口）
 
-`src/kikiemu` 已包含原生 ARM64 参数/运行目录检查、受限子进程、GPT 规划、按需增长 QCOW2 安装及 boot-v4 缓存提取模块。内部库测试65项通过。`kikiemu-disk-prototype.exe` 只供开发者测试**系统磁盘**，不写管理器注册表、不安装 setup.exe、不启动虚拟机；它不是已交付的 `kikiemu create`。
+`src/kikiemu` 已包含原生 ARM64 参数/运行目录检查、受限子进程、GPT 规划、按需增长 QCOW2 安装及 boot-v4 缓存提取模块，并新增安全 storage 删除、精确进程/端点核验、锁定与原子保存的实例记录和删除失败恢复事务。内部库测试137项通过：删除相关检查只使用新建临时目录及一次性测试子进程，未触碰真实 Android 磁盘或用户配置。另修正只设置内存/CPU时保留其他已设资源值。`kikiemu-disk-prototype.exe` 仍只供开发者测试**系统磁盘**，不写用户管理器记录、不安装 setup.exe、不启动虚拟机；它不是已交付的 `kikiemu create` 或完整公开 CLI。
 
 32 GiB 原型磁盘启动前约占1.16 GiB；GPT、boot/system/vendor 逐块读回校验及 QCOW2 检查通过，没有 backing file 或旧 userdata。首次系统启动发现上游 init 的 boot UUID 分类漏掉 virtio-blk，已在设备仓库追踪最小修补并重建。修正后单盘实际启动进入 SDL/VirGL/120Hz 桌面，剩余容量首次格式化为 F2FS，跨正常关机/重启的数据标记保持不变。
 

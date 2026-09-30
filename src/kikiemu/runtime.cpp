@@ -10,6 +10,7 @@
 #include <cctype>
 #include <fstream>
 #include <iomanip>
+#include <map>
 #include <queue>
 #include <set>
 #include <sstream>
@@ -17,6 +18,15 @@
 
 namespace kiki {
 using json = nlohmann::json;
+json parse_json_document(const std::string& text) {
+    std::map<int, std::set<std::string>> keys;
+    return json::parse(text, [&](int depth, json::parse_event_t event, json& parsed) {
+        if (event == json::parse_event_t::object_start) keys[depth + 1].clear();
+        if (event == json::parse_event_t::key && !keys[depth].insert(parsed.get<std::string>()).second)
+            throw std::runtime_error("Duplicate JSON object key; operation refused.");
+        return true;
+    });
+}
 static std::string lower(std::string text) {
     for (char& c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return text;

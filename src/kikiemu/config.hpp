@@ -26,8 +26,10 @@ struct Resources {
 Command parse_command(const std::vector<std::wstring>& args);
 uint64_t parse_gib(const std::wstring& value);
 Resources resources(const Command& command);
+Resources updated_resources(const Command& command, const Resources& current);
 fs::path normalize_directory(const std::wstring& value);
 std::string utf8(const std::wstring& value);
 std::wstring utf16(const std::string& value);
 std::wstring quote_windows_arg(const std::wstring& value);
+bool valid_instance_uuid(const std::string& value);
 } // namespace kiki

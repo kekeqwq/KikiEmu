@@ -12,9 +12,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $prefix 'include/nlohmann/json.hpp')
 }
 if (-not [IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory = Join-Path $repoRoot $OutputDirectory }
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
-$core = @('config', 'runtime', 'process', 'boot', 'disk') | ForEach-Object { Join-Path $repoRoot "src/kikiemu/$_.cpp" }
+$core = @('config', 'runtime', 'process', 'boot', 'disk', 'storage', 'lifecycle', 'registry') | ForEach-Object { Join-Path $repoRoot "src/kikiemu/$_.cpp" }
 $flags = @('-std=c++20', '-O2', '-Wall', '-Wextra', '-static', '-municode')
-$libs = @('-lbcrypt', '-lole32', '-lshell32', '-luuid')
+$libs = @('-lbcrypt', '-lole32', '-lshell32', '-luuid', '-liphlpapi', '-lws2_32')
 $inspector = Join-Path $OutputDirectory 'kikiemu-runtime-inspect.exe'
 & $compiler @flags @core (Join-Path $repoRoot 'src/kikiemu/runtime_inspect.cpp') -o $inspector @libs
 if ($LASTEXITCODE -ne 0) { throw 'Native runtime-inspector build failed.' }

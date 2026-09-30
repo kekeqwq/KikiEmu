@@ -34,6 +34,15 @@ std::wstring utf16(const std::string& value) {
     return result;
 }
 
+bool valid_instance_uuid(const std::string& value) {
+    if (value.size() != 36 || value == "00000000-0000-0000-0000-000000000000") return false;
+    for (size_t i = 0; i < value.size(); ++i) {
+        const bool dash = i == 8 || i == 13 || i == 18 || i == 23;
+        if (dash ? value[i] != '-' : !(value[i] >= '0' && value[i] <= '9') &&
+                                        !(value[i] >= 'a' && value[i] <= 'f')) return false;
+    }
+    return true;
+}
 static uint64_t positive_integer(const std::wstring& value) {
     if (value.empty()) throw std::runtime_error("Expected a positive integer.");
     uint64_t number = 0;
@@ -66,7 +75,7 @@ Command parse_command(const std::vector<std::wstring>& args) {
         {"create", {"system", "storage", "size", "qemu", "performance"}},
         {"set", {"id", "default", "qemu", "mem", "cpus", "performance"}},
         {"start", {"id"}}, {"stop", {"id"}}, {"info", {"id"}},
-        {"logs", {"id"}}, {"doctor", {"qemu"}}
+        {"logs", {"id"}}, {"doctor", {"qemu"}}, {"delete", {"id", "force"}}
     };
     auto permitted = allowed.find(name);
     if (permitted == allowed.end()) throw std::runtime_error("Unknown command: " + name);
@@ -78,6 +87,10 @@ Command parse_command(const std::vector<std::wstring>& args) {
         if (!permitted->second.contains(option))
             throw std::runtime_error("Unsupported option --" + option + " for " + name + ".");
         if (result.options.contains(option)) throw std::runtime_error("Duplicate option --" + option + ".");
+        if (name == "delete" && option == "force") {
+            result.options[option] = L"true";
+            continue;
+        }
         if (++i >= args.size() || args[i].empty() || args[i].starts_with(L"--"))
             throw std::runtime_error("Missing value for --" + option + ".");
         result.options[option] = args[i];
@@ -98,15 +111,21 @@ Command parse_command(const std::vector<std::wstring>& args) {
             if (result.options.size() == 1) throw std::runtime_error("No instance settings were supplied.");
         }
     }
-    if (name == "info" || name == "logs" || name == "stop") require("id");
+    if (name == "info" || name == "logs" || name == "stop" || name == "delete") require("id");
+    if (name == "delete" && !result.options.contains("force"))
+        throw std::runtime_error("Deletion permanently removes all instance data. Use delete --force --id NN.");
     if (name == "create" || name == "set") resources(result);
     return result;
 }
 
 Resources resources(const Command& command) {
-    Resources result;
+    return updated_resources(command, Resources{});
+}
+Resources updated_resources(const Command& command, const Resources& current) {
+    Resources result = current;
     auto preset = command.options.find("performance");
     if (preset != command.options.end()) {
+        result = Resources{};
         result.preset = utf8(preset->second);
         if (result.preset == "medium") result.memoryBytes = 6ULL << 30;
         else if (result.preset == "high") { result.cpus = 10; result.memoryBytes = 8ULL << 30; }

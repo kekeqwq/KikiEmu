@@ -1,6 +1,6 @@
 # KikiEmu / KikiAOSP 0.1 Alpha release plan
 
-Status: implementation branch, 2026-09-30. Native internal disk-install/boot-cache modules and an icon master exist; no accepted release build, public manager/installer, setup.exe, format-1 ZIP, tag or GitHub Release yet. The accepted mainline remains the development rollback baseline.
+Status: implementation branch, 2026-10-01. Native internal disk-install/boot-cache, guarded storage/process deletion and journaled registry modules plus an icon master exist; no accepted release build, public manager/installer, setup.exe, format-1 ZIP, tag or GitHub Release yet. The accepted mainline remains the development rollback baseline.
 
 ## Agreed requirements
 
@@ -15,7 +15,7 @@ Status: implementation branch, 2026-09-30. Native internal disk-install/boot-cac
 
 ## Producer-owned contract
 
-The canonical [package contract](https://github.com/kekeqwq/kikiaosp_test/blob/5af23aeeeec69e01eb4d3fa2d56778c029eb34ad/RELEASE_FORMAT.md) and [release policy](https://github.com/kekeqwq/kikiaosp_test/blob/5af23aeeeec69e01eb4d3fa2d56778c029eb34ad/RELEASE_POLICY.md) live in kikiaosp_test. These are drafts; this exact revision records the user-provided QEMU and user-owned installer acceptance requirements. The consumer must pin the exact schema/fixture revision when the package reader is implemented, not build against a floating URL or independently redefine the format.
+The canonical [package contract](https://github.com/kekeqwq/kikiaosp_test/blob/a89008c2c8f947c0f834dc14595a012127e74289/RELEASE_FORMAT.md) and [release policy](https://github.com/kekeqwq/kikiaosp_test/blob/a89008c2c8f947c0f834dc14595a012127e74289/RELEASE_POLICY.md) live in kikiaosp_test. These are drafts; this exact revision records the user-provided QEMU, user-owned installer acceptance and explicit destructive deletion requirements. The consumer must pin the exact schema/fixture revision when the package reader is implemented, not build against a floating URL or independently redefine the format.
 
 Proposed format1: ZIP with manifest.json, a boot-header-v4 boot.img containing matching kernel/full initramfs, raw EROFS system.img/vendor.img, source-lock and licenses. No full disk/data image/initialized service disk/nested support archive. CP2A product/system_ext are inside system; historic compatibility disks are not public payload roles. Freeze header/layout/ABI rules only AFTER the producer/consumer installation prototype boots and passes.
 
@@ -46,6 +46,7 @@ kikiemu set --id 01 --cpus 8
 kikiemu set --id 01 --qemu ~/Tools/KikiQemu-v2/bin
 kikiemu start --id 01
 kikiemu stop --id 01
+kikiemu --delete --force --id 01
 kikiemu info --id 01
 kikiemu logs --id 01
 kikiemu doctor
@@ -53,6 +54,20 @@ kikiemu adb --id 01 shell
 ```
 
 Create requires system/storage/size/qemu; performance is optional. `--create` and `--set` are accepted aliases for the `create` and `set` subcommands. `g` means GiB and help states it. Lock and atomically save manager edits. List total capacity, actual host use, resource configuration, GPU VirGL and runtime status. Proposed presets: default8CPU/4GiB, medium8CPU/6GiB, high10CPU/8GiB, with identical render/resolution baseline and host-aware validation; no fictional additional GPUs.
+
+### Explicit destructive instance deletion
+
+`kikiemu --delete --force --id 01` (also `kikiemu delete --force --id 01`) permanently deletes that instance. `--force` is a valueless flag and mandatory: without it refuse with an English instruction, rather than silently deleting or prompting from the desktop entry. Always require an explicit ID; deletion never falls back to the default. This is a separately authorized destructive operation, not an implicit part of stop, set or uninstall.
+
+The manager locks the instance against start/set, resolves its registered UUID/channel, and performs read-only preflight before touching processes or files. Require its creation-time directory file identity, matching `.kikiemu-owner.json`, normalized local absolute path and no junction/symlink/reparse redirection in ancestors or children. Reject volume/profile/protected application roots, overlap with other instances/manager/install/QEMU/workspace directories, and edited/foreign ownership. No caller-supplied `--storage` path on delete. Pin ancestor/root handles through the transaction; do not delegate recursive deletion to a shell or follow reparse targets.
+
+Journal the delete outside storage, then validate ALL recorded live process identities (UUID/channel, exact EXE/SHA, creation time, PID-reuse protection and endpoint ownership) before stopping ANY. Terminate only the owned supervisor/QEMU/camera/private ADB runtime and wait for actual exit before removing the registered storage directory including its disk, boot cache and local logs. Force deletion does not promise a graceful guest shutdown or recoverability: the user's data is intentionally discarded. Never kill by process name/window title or call global `adb kill-server`.
+
+Unregister and clear the default ONLY after filesystem removal succeeds; keep a recoverable failed-delete record on error/interruption. Refuse to redirect a recovery to another path. Delete leaves the original system ZIP, BYO QEMU directory, other instances and the installation intact. English success: `Deleted instance 01 and its storage. Default system cleared.` (omit the last sentence when it was not default). Distinguish this from uninstall, which retains disks and recoverable records.
+
+Internal deletion-library tests exercise ONLY brand-new temporary fixtures and exact disposable test children, not the user's public CLI/installer acceptance or actual VM disks. The library now covers owner/directory/PID/channel/endpoint guards, protected/redirected paths, target-only termination, default removal, partial failure/retry and recovery after disk removal before unregister. End-to-end public delete/default/journal recovery and wrong-target tests join the user-owned acceptance matrix before publication; the library is not a claim of public manager/setup/delete delivery.
+
+Windows safety primitives: [CreateFileW sharing/reparse semantics](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew), [handle-based file disposition](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfileinformationbyhandle), [process creation time](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes) and [TCP endpoint owner inspection](https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getextendedtcptable). These checks prevent accidental cross-instance operations; records are not a cryptographic security boundary against the same Windows user deliberately editing all authoritative files.
 
 `set` mutable whitelist initially covers supported QEMU startup resource fields --mem/--cpus/--performance, the validated QEMU bin binding --qemu, plus manager --default. A running instance keeps its effective config and original QEMU binding. Report `Updated instance 01. Changes will take effect on the next start.` No promise of live hotplug. Reject --size, raw QEMU arguments, unsafe backend/kernel/OS/boot/ABI changes.
 
