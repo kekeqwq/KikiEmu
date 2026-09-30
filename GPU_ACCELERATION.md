@@ -1,6 +1,6 @@
-# GPU acceleration experiment — 2026-09-27
+# GPU acceleration investigation — historical measurements from 2026-09-27
 
-Branches: `feature/gpu-virgl-20260927` in KikiEmu, kikiaosp_test, and kikiaosp_kernel. This is an experimental path; `profiles/network-audio-20260926.json` remains the verified software baseline.
+This document is a chronological investigation; references below to experimental branches/defaults describe their date, not the current launcher. VirGL/SDL acceleration is now accepted on main; the default is [surface-main-20260930.json](profiles/surface-main-20260930.json), described in [README](README.md) and [the baseline record](BASELINE_20260930.md). The old network/audio profile is an explicit historical software comparison. GPU acceleration is implemented, but end-to-end interaction latency remains unresolved.
 
 ## Measured baseline
 

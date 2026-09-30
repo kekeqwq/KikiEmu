@@ -4,5 +4,8 @@
 /tools/*.ps1 text eol=lf
 /profiles/*.json text eol=lf
 /README.md text eol=lf
+/CAMERA_SUPPORT.md text eol=lf
+/GPU_ACCELERATION.md text eol=lf
+/BASELINE_20260930.md text eol=lf
 /.gitignore text eol=lf
 /.gitattributes text eol=lf

@@ -1,6 +1,6 @@
-# Surface 前后摄 — 2026-09-30 功能分支
+# Surface 前后摄 — 2026-09-30 主线
 
-当前成果仍在 `feat/surface-camera-20260930`，不覆盖已冻结的主线配对。实际 Windows ARM64 QEMU + WHPX、SDL、VirGL 下，前后摄预览已出真实影像；修正方向后，用户确认快门可拍摄，三张 640×480 JPEG 已保存到客机 `Pictures` 并在本机验证可解码。
+用户已验收并要求合并 main。实际 Windows ARM64 QEMU + WHPX、SDL、VirGL 下，前后摄预览已出真实影像；修正方向后，用户确认快门可拍摄，640×480 JPEG 已保存到客机 `Pictures` 并在本机验证可解码。当前完整主线包含 ThemePicker，默认配对是 [surface-main-20260930.json](profiles/surface-main-20260930.json)；`surface-camera-20260930.json` 仅保留为主题功能加入前的显式 checkpoint。
 
 ## 构建与启动
 
@@ -13,11 +13,11 @@ cd ~/projects/kikiaosp_test
 cd ~/aosp-master
 source build/envsetup.sh
 lunch kikiaosp_test_arm64_phone-cp2a-userdebug
-m -j8 vendorimage
-sha256sum out/target/product/kikiaosp_test/vendor.img
+m -j8 systemimage vendorimage
+sha256sum out/target/product/kikiaosp_test/{system,vendor}.img
 ```
 
-本功能的最终 vendor 为 `115626c3ad9a31744389307e135e8a6a08922749ec1e02cf5f3b3d3cb2848350`，其他镜像配对见 [profile](profiles/surface-camera-20260930.json)。已冻结产物仍是 Git 之外的运行资产；只 clone Git 不会自动取得镜像。此 profile 是新启动器的配对记录，不适用于旧的 `collect_kikiaosp_assets.ps1` 收集格式。
+相机 checkpoint 的 vendor 为 `115626c3ad9a31744389307e135e8a6a08922749ec1e02cf5f3b3d3cb2848350`；当前含完整主题功能的 vendor 为 `72202a6af84fc79fc35cefb6d0f6e502fc266b2bbc6c867a49271f4dd234bb4a`。新主线 profile 兼容收集器，已冻结产物仍是 Git 之外的运行资产；只 clone Git 不会自动取得镜像。旧相机 checkpoint 的 profile 没有远端收集字段，不能直接用于收集器。
 
 在 MSYS2 **CLANGARM64** 安装 C++/WinRT 头文件：
 
@@ -30,15 +30,15 @@ PowerShell 7 在本仓库运行：
 ```powershell
 $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH
 ./tools/build_surface_camera_bridge.ps1
-scp keke@192.168.2.185:/home/keke/aosp-master/out/target/product/kikiaosp_test/vendor.img ./bundles/cp2a-camera2-20260930/vendor-kikiaosp-camera-virgl-final-20260930.img
-./tools/run_kikiaosp_surface_camera.ps1 -ValidateAllAssets
+./tools/collect_kikiaosp_assets.ps1
+./tools/run_kikiaosp_local.ps1 -ValidateAllAssets
 adb connect 127.0.0.1:5555
 adb shell am start -W -n com.android.camera2/com.android.camera.CameraActivity
 ```
 
 QEMU 使用 [已追踪的稳定 SDL 补丁](patches/qemu-kikiaosp-tested-surface-20260929.patch)，不需要本次 transfer 日志诊断改动。构建方法见主 README。保持 QEMU 在正常 build 目录，不能仅复制一个 EXE 到没有 ROM/运行依赖的目录后裸启动。
 
-启动器保持窗口 1003×1556、Android 288dpi / font scale 1.5、客机 120Hz、8 vCPU / 4 GiB，无 Grab、无 console。宿主显示设定不变。`-ValidateAllAssets` 检查全部镜像哈希，包含大 userdata；正常启动只验证全部文件长度及内核/vendor 哈希。启动脚本另核对编译出的 SDL 能力标记并输出 QEMU 路径与 SHA-256。
+启动器保持窗口 1003×1556、Android 288dpi / font scale 1.5、客机 120Hz、8 vCPU / 4 GiB，无 Grab、无 console。宿主显示设定不变。`-ValidateAllAssets` 检查全部镜像哈希，包含大 userdata；当前默认入口正常启动也验证全部文件长度及 kernel/system/vendor 哈希。启动脚本另核对编译出的 SDL 能力标记并输出 QEMU 路径与 SHA-256。旧相机 checkpoint 使用 `run_kikiaosp_surface_camera.ps1` 显式回溯。
 
 默认 `-snapshot`，本次启动中新增照片和应用数据不持久保存。关闭前需要保留照片时先 `adb pull /sdcard/Pictures <本机私有目录>`。不得把这些照片和桌面截图提交到仓库。
 

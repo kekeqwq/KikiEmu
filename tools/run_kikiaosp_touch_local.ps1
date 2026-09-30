@@ -1,17 +1,17 @@
 param(
   [string]$Tag,
-  [string]$BundleDir = (Join-Path $PSScriptRoot '..\bundles\network-audio-20260926'),
+  [string]$BundleDir = (Join-Path $PSScriptRoot '..\bundles\surface-main-20260930'),
   [string]$QemuPath = (Join-Path $PSScriptRoot 'qemu-src\build\qemu-system-aarch64.exe'),
   [string]$Msys2Bin = 'C:\msys64\clangarm64\bin',
-  [string]$KernelImage = 'kernel-linux-7.3-rc4-4k-dmabuf',
-  [string]$SystemImage = 'system-kikiaosp-network-audio-c2aidl.img',
-  [string]$VendorImage = 'vendor-kikiaosp-network-audio-cap37.img',
-  [string]$ProductImage = 'kiki-empty-product.img',
-  [string]$SystemExtImage = 'kiki-empty-system_ext.img',
+  [string]$KernelImage = 'kernel-linux-7.3-rc4-4k-fencefix-20260927',
+  [string]$SystemImage = 'system-kikiaosp-cp2a-theme-picker-20260930.img',
+  [string]$VendorImage = 'vendor-kikiaosp-cp2a-theme-picker-20260930.img',
+  [string]$ProductImage = 'product-kikiaosp-gallery-wallpaper-20260929.img',
+  [string]$SystemExtImage = 'system_ext-kikiaosp-wallpaper-20260929.img',
   [string]$UserdataImage = 'userdata-kikiaosp17-f2fs.img',
   [string]$MiscImage = 'misc.img',
   [switch]$PersistentDisks,
-  [ValidateSet('Software', 'Virgl')][string]$GpuMode = 'Software',
+  [ValidateSet('Software', 'Virgl')][string]$GpuMode = 'Virgl',
   [ValidateSet('Client', 'Guest')][string]$HwcMode = 'Client',
   [ValidateSet('skiaglthreaded', 'skiagl')][string]$RenderEngineBackend = 'skiaglthreaded',
   [ValidateSet('gtk', 'sdl')][string]$DisplayBackend = 'sdl',
@@ -23,7 +23,7 @@ param(
   [ValidateRange(30, 120)][int]$GuestRefreshRateHz = 120,
   [switch]$AngleEgl,
   [switch]$GpuBlob,
-  [ValidateRange(1, 16)][int]$VcpuCount = 4,
+  [ValidateRange(1, 16)][int]$VcpuCount = 8,
   [ValidateRange(0, 8)][int]$KernelLogLevel = 8,
   [switch]$NativeResolution = $true,
   [ValidateRange(864, 3840)][int]$PortraitWidthPixels = 1003,
@@ -35,7 +35,7 @@ param(
   [switch]$InputTrace,
   [switch]$ResolutionTrace,
   [switch]$TraceVirglFences,
-  [switch]$SurfaceCameras,
+  [switch]$SurfaceCameras = $true,
   [string]$SurfaceCameraBridgePath = (Join-Path $PSScriptRoot 'build\surface-camera-bridge.exe'),
   [ValidateRange(1024, 65535)][int]$SurfaceCameraPort = 4455,
   [switch]$SdlKeyboardTrace,
@@ -44,7 +44,8 @@ param(
   [switch]$DryRun
 )
 
-# Verified Ethernet, speaker, and Codec2 UI-sound baseline.
+# Accepted CP2A SDL/VirGL Surface baseline. Prefer run_kikiaosp_local.ps1 for
+# profile/hash validation; this is the lower-level explicit A/B launcher.
 $ErrorActionPreference = 'Stop'
 if ($GpuMode -eq 'Virgl' -and -not $DryRun -and
     $VendorImage -eq 'vendor-kikiaosp-network-audio-cap37.img') {
@@ -84,7 +85,7 @@ if ($shortDisplaySide -lt 864 -or ($PortraitWidthPixels * $PortraitHeightPixels)
   throw "The minimum usable guest display is 864 pixels on the short side and 1,492,992 total pixels; refusing $($PortraitWidthPixels)x$($PortraitHeightPixels)."
 }
 if ([string]::IsNullOrWhiteSpace($Tag)) {
-  $Tag = "network-audio-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
+  $Tag = "surface-main-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
 }
 $images = (Resolve-Path -LiteralPath $BundleDir).Path
 $qemu = (Resolve-Path -LiteralPath $QemuPath).Path

@@ -47,6 +47,9 @@ mkdir -p "$source_dir/build"
         --target-list=aarch64-softmmu \
         --enable-whpx \
         --enable-gtk \
+        --enable-sdl \
+        --enable-opengl \
+        --enable-virglrenderer \
         --enable-slirp \
         --disable-werror \
         --disable-docs \

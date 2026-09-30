@@ -6,6 +6,7 @@
 !/README.md
 !/GPU_ACCELERATION.md
 !/CAMERA_SUPPORT.md
+!/BASELINE_20260930.md
 !/patches/
 /patches/*
 !/patches/qemu-kikiaosp-tested-surface-20260929.patch
@@ -22,11 +23,13 @@
 !/profiles/gpu-virgl-20260927.json
 !/profiles/gpu-virgl-native-20260927.json
 !/profiles/surface-camera-20260930.json
+!/profiles/surface-main-20260930.json
 !/tools/
 /tools/*
 !/tools/build_qemu_arm64.sh
 !/tools/build_surface_camera_bridge.ps1
 !/tools/run_kikiaosp_surface_camera.ps1
+!/tools/run_kikiaosp_local.ps1
 !/tools/stop_kikiaosp_local.ps1
 !/tools/surface_camera_bridge.cpp
 !/tools/surface_camera_winrt.cpp

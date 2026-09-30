@@ -5,7 +5,7 @@ param(
   [string]$AospRoot = '/home/keke/aosp-master',
   [string]$DeviceRepo = '/home/keke/projects/kikiaosp_test',
   [string]$KernelRepo = '/home/keke/projects/kikiaosp_kernel',
-  [string]$ProfilePath = (Join-Path $PSScriptRoot '..\profiles\network-audio-20260926.json'),
+  [string]$ProfilePath = (Join-Path $PSScriptRoot '..\profiles\surface-main-20260930.json'),
   [string]$OutputDir,
   [string]$LocalSupportArchive
 )
@@ -54,6 +54,18 @@ function Receive-Asset([string]$hostName, [string]$remotePath, $spec) {
   Assert-Hash $target $spec
 }
 
+function Receive-AndroidAsset($spec) {
+  # Accepted images can be frozen under device/output so a later incremental
+  # build cannot silently replace the assets selected by a stable profile.
+  if ($spec.sourceRepository -eq 'device') {
+    Receive-Asset $AospHost "$DeviceRepo/$($spec.source)" $spec
+  } elseif (-not $spec.sourceRepository -or $spec.sourceRepository -eq 'aosp') {
+    Receive-Asset $AospHost "$AospRoot/$($spec.source)" $spec
+  } else {
+    throw "Unknown source repository for $($spec.name): $($spec.sourceRepository)"
+  }
+}
+
 if (Test-Path -LiteralPath $outputFull) {
   throw "Output directory already exists; refusing to overwrite: $outputFull"
 }
@@ -63,13 +75,13 @@ Assert-RemoteCommit $KernelHost $KernelRepo $profile.kernelRepositoryCommit
 New-Item -ItemType Directory -Path $outputFull -Force | Out-Null
 try {
   Receive-Asset $KernelHost "$KernelRepo/$($profile.kernel.source)" $profile.kernel
-  Receive-Asset $AospHost "$AospRoot/$($profile.system.source)" $profile.system
-  Receive-Asset $AospHost "$AospRoot/$($profile.vendor.source)" $profile.vendor
+  Receive-AndroidAsset $profile.system
+  Receive-AndroidAsset $profile.vendor
   if ($null -ne $profile.product) {
-    Receive-Asset $AospHost "$AospRoot/$($profile.product.source)" $profile.product
+    Receive-AndroidAsset $profile.product
   }
   if ($null -ne $profile.systemExt) {
-    Receive-Asset $AospHost "$AospRoot/$($profile.systemExt.source)" $profile.systemExt
+    Receive-AndroidAsset $profile.systemExt
   }
 
   $archivePath = Join-Path $outputFull $profile.supportArchive.name
@@ -94,7 +106,11 @@ try {
   }
   Copy-Item -LiteralPath $profilePath -Destination (Join-Path $outputFull 'bundle-profile.json')
   Write-Host "Bundle ready: $outputFull"
-  Write-Host "Start with: .\tools\run_kikiaosp_touch_local.ps1 -BundleDir '$outputFull'"
+  if ($profile.display) {
+    Write-Host "Start with: .\tools\run_kikiaosp_local.ps1 -ProfilePath '$profilePath' -BundleDir '$outputFull'"
+  } else {
+    Write-Host "Legacy software profile: .\tools\run_kikiaosp_touch_local.ps1 -BundleDir '$outputFull' (pass its exact image names)"
+  }
 } catch {
   Write-Warning "Collection is incomplete; partial files were left for inspection at $outputFull"
   throw
