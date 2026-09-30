@@ -4,9 +4,9 @@
 
 | 仓库 | 职责 |
 | --- | --- |
-| [kikiaosp_test](https://github.com/kekeqwq/kikiaosp_test) | Android 17 设备树、AOSP 集成补丁、源码审计、system/vendor 镜像 |
+| [kikiaosp_test](https://github.com/kekeqwq/kikiaosp_test) | Android 17 设备树、AOSP 集成补丁、源码审计、system/vendor 镜像；维护系统安装包标准与干净发行规划 |
 | [kikiaosp_kernel](https://github.com/kekeqwq/kikiaosp_kernel) | Linux 7.3-rc4 4 KiB 内核与 Nix 构建 |
-| 本仓库 | Windows ARM64 QEMU 补丁及构建、摄像头桥接、镜像收集、打包、启动与测试 |
+| 本仓库 | Windows ARM64 QEMU 补丁及构建、摄像头桥接、开发镜像收集/启动/测试；终端用户安装器、系统包消费与实例管理规划 |
 
 ## 当前主线：2026-09-30
 
@@ -111,6 +111,8 @@ QEMU 在后台无控制台运行。监控仅监听 `127.0.0.1:4447`，ADB `127.0
 截图采用 DPI-aware Windows 整桌面 2880×1920，保存于 `~/Downloads/temp`；测试期间保持正常窗口，先看启动日志再截图。退出工具先停止相机，再通过 QEMU monitor 正常退出并等待进程结束，不盲杀其他进程。照片、截图及原始诊断日志可能含私人内容，不能提交公开仓库。
 
 ## 开发规则
+
+0.1 Alpha 目前只做发布规划，见 [RELEASE_PLAN.md](RELEASE_PLAN.md)。正式系统包仅交付干净构建的安装材料，不包含用户磁盘；客户端新建固定总容量、动态占用的持久化磁盘。现有冻结 bundle/collector 是开发回溯格式，不是公开发版格式。系统包合同由 kikiaosp_test 维护，格式/schema/语义校验及双方兼容性测试在首个原型通过后冻结。正式与开发版本的身份、私有运行库、数据、ADB/控制/相机端点隔离必须在0.1发布前完成；用户正式实例运行时推进开发的误操作防护是永久发布门槛。
 
 原生 SDL 启动控制台已通过实际启动和用户验收，纳入默认主线；Android/内核资产不变。遮罩前的冻结基线见 [surface-main-pre-boot-console-20260930.json](profiles/surface-main-pre-boot-console-20260930.json)，仅用于显式回溯。构建、状态判断和证据边界见 [BOOT_CONSOLE.md](BOOT_CONSOLE.md)。
 
