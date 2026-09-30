@@ -17,6 +17,7 @@
 - DocumentsUI 文件管理器、Gallery2、Camera2、完整 ThemePicker（壁纸、颜色、主题图标）。ThemePicker 通过设备资源包和 Launcher3 原生 provider 接入，不修改上游主题/桌面源码。
 - Surface 前后真实摄像头可切换、方向修正、可拍 JPEG；退出相机释放设备。预览使用 VirGL 显示/合成；采集、传输、色彩转换和 JPEG 仍有 CPU 工作。不是零拷贝或硬件 JPEG 编码。详见 [相机说明](CAMERA_SUPPORT.md)。
 - 默认 1003×1556 原生像素、288 dpi、字体缩放 1.5、120 Hz 客体、8 vCPU/4 GiB、SDL 窗口和音频、无 Grab/console；不改宿主显示设定。拉伸窗口仍走真实动态分辨率，不放大旧画布。最低测试预算为短边 864、总像素 1,492,992。
+- 默认启用同窗口的原生启动控制台：固定点阵文本 Logo、实时内核/Android/配置日志、真实参数和启动成功摘要，桌面就绪后自动撤下；不是第二个 console 窗口。详见 [BOOT_CONSOLE.md](BOOT_CONSOLE.md)。
 - VirGL 加速已实际出图。此前同资源预算的动画 APK 热身后达到 70.36–110.89 FPS；这是 APK 回调帧率，不是面板呈现 FPS。桌面操作仍有端到端延迟，不能宣称已完全跟手。历史诊断见 [GPU_ACCELERATION.md](GPU_ACCELERATION.md)。
 
 ## 1. 在 Linux 准备镜像
@@ -50,7 +51,7 @@ m -j8 systemimage vendorimage
 pacman -Syu
 # 按 pacman 提示重开终端后完成 pacman -Su。
 pacman -S --needed git make ninja python pkgconf \
-  mingw-w64-clang-aarch64-clang mingw-w64-clang-aarch64-glib2 \
+  mingw-w64-clang-aarch64-clang mingw-w64-clang-aarch64-pkgconf mingw-w64-clang-aarch64-glib2 \
   mingw-w64-clang-aarch64-gtk3 mingw-w64-clang-aarch64-SDL2 \
   mingw-w64-clang-aarch64-libslirp mingw-w64-clang-aarch64-pixman \
   mingw-w64-clang-aarch64-zstd mingw-w64-clang-aarch64-libepoxy \
@@ -58,9 +59,9 @@ pacman -S --needed git make ninja python pkgconf \
 ./tools/build_qemu_arm64.sh
 ```
 
-脚本固定 QEMU 上游 `bde658eef6b38c45794bfd7ad4d2dd1b574e4694`，应用 [完整稳定补丁](patches/qemu-kikiaosp-tested-surface-20260929.patch)，显式启用 WHPX、SDL、OpenGL、VirGL，并保留 GTK 对照后端。补丁涵盖 Windows WGL、DPI 原生像素、WM_POINTER 触摸、外设键盘、禁止鼠标 Grab、120 Hz 和 SDL 音频。已有脏源码会拒绝覆盖，可传入另一个新源码目录。不要把诊断补丁叠加到默认 EXE。
+脚本固定 QEMU 上游 `bde658eef6b38c45794bfd7ad4d2dd1b574e4694`，依次应用 [完整稳定补丁](patches/qemu-kikiaosp-tested-surface-20260929.patch) 和 [原生启动控制台补丁](patches/qemu-sdl-boot-console.patch)，显式启用 WHPX、SDL、OpenGL、VirGL，并保留 GTK 对照后端。补丁涵盖 Windows WGL、DPI 原生像素、WM_POINTER 触摸、外设键盘、禁止鼠标 Grab、120 Hz、SDL 音频和同窗口启动画面。默认构建目录为 `tools/qemu-boot-src`，并行度8，可用 `KIKI_BUILD_JOBS` 调整。已有脏源码会拒绝覆盖，可传入另一个新源码目录；已打补丁的源码后续直接 `ninja -C tools/qemu-boot-src/build -j8 qemu-system-aarch64.exe` 增量构建。不要把诊断补丁叠加到默认 EXE。
 
-默认 EXE 为 `tools/qemu-src/build/qemu-system-aarch64.exe`；已测试版本 SHA-256 为 `5b92d13e421124d55e0420d3879cabdc491eeb3cf370332ec4bc84a57e4ff49a`。重建的二进制可以哈希不同，但须保留能力并回归测试。运行不能只复制 EXE，还需要 ROM、运行库和宿主 OpenGL 驱动。Surface 已验证的宿主驱动为 Mesa D3D12 → Qualcomm Adreno；MSYS2 virglrenderer 是渲染协议库，不自动安装该宿主驱动。启动器把 `C:\msys64\clangarm64\bin` 放入进程 DLL 搜索路径。
+默认 EXE 为 `tools/qemu-boot-src/build/qemu-system-aarch64.exe`；已测试版本 SHA-256 为 `3004741332643cfd775f83ad990714716ca9975ae341f0355fda7fded4c4a651`。遮罩前的5b92版本留在旧构建目录，只有显式回溯 profile 才使用，不会自动回退到旧文件。重建的二进制可以哈希不同，但须保留能力并回归测试。运行不能只复制 EXE，还需要 ROM、运行库和宿主 OpenGL 驱动。Surface 已验证的宿主驱动为 Mesa D3D12 → Qualcomm Adreno；MSYS2 virglrenderer 是渲染协议库，不自动安装该宿主驱动。启动器把 `C:\msys64\clangarm64\bin` 放入进程 DLL 搜索路径。
 
 PowerShell 7 构建原生摄像头桥接：
 
@@ -97,7 +98,7 @@ adb shell pm path com.android.wallpaper
 adb shell uname -a
 ```
 
-正常启动每次校验所有文件长度和 kernel/system/vendor 的哈希；`-ValidateAllAssets` 额外检查全部辅助盘。QEMU 另检查已编译的 SDL 能力标记并打印 EXE 路径及哈希，避免巨大旧 GTK 窗口、触摸和 Grab 回归。可用 `-DryRun` 只生成命令，用 `-SurfaceCameras:$false` 关闭本次相机桥接。`run_kikiaosp_touch_local.ps1` 为显式参数 A/B 测试底层入口，不代替清单校验。
+正常启动每次校验所有文件长度和 kernel/system/vendor 的哈希；`-ValidateAllAssets` 额外检查全部辅助盘。QEMU 另检查已编译的 SDL 能力标记并打印 EXE 路径及哈希，避免巨大旧 GTK 窗口、触摸和 Grab 回归。当前 profile 默认开启启动遮罩，可用 `-BootConsole:$false` 临时禁用；旧 profile 没有此标记则不开启。可用 `-DryRun` 只生成命令，用 `-SurfaceCameras:$false` 关闭本次相机桥接。`run_kikiaosp_touch_local.ps1` 为显式参数 A/B 测试底层入口，不代替清单校验。
 
 QEMU 在后台无控制台运行。监控仅监听 `127.0.0.1:4447`，ADB `127.0.0.1:5555`，相机桥接 `127.0.0.1:4455`。默认 snapshot 不写回基础磁盘：照片和应用数据需要保留时，关闭前先 `adb pull`。持久磁盘须显式使用独立 qcow2 overlay，不允许直接写基础 raw 镜像。日志保存在 bundle。
 
@@ -110,5 +111,7 @@ QEMU 在后台无控制台运行。监控仅监听 `127.0.0.1:4447`，ADB `127.0
 截图采用 DPI-aware Windows 整桌面 2880×1920，保存于 `~/Downloads/temp`；测试期间保持正常窗口，先看启动日志再截图。退出工具先停止相机，再通过 QEMU monitor 正常退出并等待进程结束，不盲杀其他进程。照片、截图及原始诊断日志可能含私人内容，不能提交公开仓库。
 
 ## 开发规则
+
+原生 SDL 启动控制台已通过实际启动和用户验收，纳入默认主线；Android/内核资产不变。遮罩前的冻结基线见 [surface-main-pre-boot-console-20260930.json](profiles/surface-main-pre-boot-console-20260930.json)，仅用于显式回溯。构建、状态判断和证据边界见 [BOOT_CONSOLE.md](BOOT_CONSOLE.md)。
 
 三个仓库分别维护职责内的源码，功能另开分支、审计、增量构建、本地实测后再合并 main。新镜像必须新建 profile，保留旧冻结配对，不在旧文件名下覆盖新内容。当前默认入口和文档只指向已验收主线；历史帧率/回调边界、限制和失败记录不能被改写成新版本的保证。

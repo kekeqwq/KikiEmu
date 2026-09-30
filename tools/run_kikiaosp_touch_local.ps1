@@ -1,7 +1,7 @@
 param(
   [string]$Tag,
   [string]$BundleDir = (Join-Path $PSScriptRoot '..\bundles\surface-main-20260930'),
-  [string]$QemuPath = (Join-Path $PSScriptRoot 'qemu-src\build\qemu-system-aarch64.exe'),
+  [string]$QemuPath = (Join-Path $PSScriptRoot 'qemu-boot-src\build\qemu-system-aarch64.exe'),
   [string]$Msys2Bin = 'C:\msys64\clangarm64\bin',
   [string]$KernelImage = 'kernel-linux-7.3-rc4-4k-fencefix-20260927',
   [string]$SystemImage = 'system-kikiaosp-cp2a-theme-picker-20260930.img',
@@ -41,12 +41,17 @@ param(
   [switch]$SdlKeyboardTrace,
   [string]$TraceEventsPath,
   [switch]$GlobalFpsProfile,
+  [switch]$BootConsole,
+  [ValidateRange(30, 600)][int]$BootTimeoutSeconds = 240,
   [switch]$DryRun
 )
 
 # Accepted CP2A SDL/VirGL Surface baseline. Prefer run_kikiaosp_local.ps1 for
 # profile/hash validation; this is the lower-level explicit A/B launcher.
 $ErrorActionPreference = 'Stop'
+if ($BootConsole -and ($DisplayBackend -ne 'sdl' -or $GpuMode -ne 'Virgl')) {
+  throw '-BootConsole requires the native SDL/VirGL display backend'
+}
 if ($GpuMode -eq 'Virgl' -and -not $DryRun -and
     $VendorImage -eq 'vendor-kikiaosp-network-audio-cap37.img') {
   throw 'VirGL requires a vendor image containing Mesa VirGL. Pass -VendorImage with the new verified image.'
@@ -95,6 +100,7 @@ if ($DisplayBackend -eq 'sdl') {
   # giant DPI-scaled windows, mouse grab and the wrong guest refresh rate.
   # Check compiled feature markers before starting WHPX or opening a window.
   $requiredSdlFeatures = @('KIKI_SDL_DISABLE_GRAB', 'KIKI_SDL_DISABLE_IME', 'KIKI_SDL_GUEST_REFRESH_RATE_HZ')
+  if ($BootConsole) { $requiredSdlFeatures += 'KIKI_SDL_BOOT_STATUS' }
   if ($NativeResolution) {
     $requiredSdlFeatures += @('KIKI_SDL_NATIVE_PIXELS', 'KIKI_SDL_START_WIDTH', 'KIKI_SDL_START_HEIGHT')
   }
@@ -138,10 +144,16 @@ if (-not (Test-Path -LiteralPath $kernel)) { throw "Missing kernel image $kernel
 $serial = Join-Path $images "qemu-kikiaosp-$Tag.log"
 $logcat = Join-Path $images "qemu-kikiaosp-$Tag.logcat"
 $cameraBridgeLog = Join-Path $images "qemu-kikiaosp-$Tag.camera-bridge.log"
+$displayLog = Join-Path $images "qemu-kikiaosp-$Tag.display.log"
+$bootStatus = Join-Path $images "qemu-kikiaosp-$Tag.boot-status.ini"
+$bootEvents = Join-Path $images "qemu-kikiaosp-$Tag.boot-events.log"
 $qemuTrace = Join-Path $images "qemu-kikiaosp-$Tag.qemu-trace.log"
 $globalFpsLog = Join-Path $images "qemu-kikiaosp-$Tag.global-fps.log"
 foreach ($path in @($serial, $logcat)) {
   if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite $path" }
+}
+foreach ($path in @($displayLog) + $(if ($BootConsole) { @($bootStatus, $bootEvents) })) {
+  if ($path -and (Test-Path -LiteralPath $path)) { throw "Refusing to overwrite $path" }
 }
 if ($SurfaceCameras -and (Test-Path -LiteralPath $cameraBridgeLog)) {
   throw "Refusing to overwrite $cameraBridgeLog"
@@ -275,6 +287,7 @@ if ($SurfaceCameras) {
 }
 
 if ($DryRun) {
+  "BOOT_CONSOLE=$BootConsole BOOT_STATUS=$(if ($BootConsole) { $bootStatus } else { 'off' })"
   "QEMU_EXE=$qemu GPU_MODE=$GpuMode HWC_MODE=$HwcMode RENDERENGINE_BACKEND=$RenderEngineBackend GPU_BLOB=$GpuBlob AUDIO_BACKEND=$AudioBackend GUEST_REFRESH_RATE_HZ=$GuestRefreshRateHz VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel SDL_KEY_TRACE=$SdlKeyboardTrace SDL_MOUSE_GRAB=$(if ($DisplayBackend -eq 'sdl') { 'disabled' } else { 'backend-default' }) GLOBAL_FPS_PROFILE=$GlobalFpsProfile SURFACE_CAMERAS=$SurfaceCameras SURFACE_CAMERA_PORT=$(if ($SurfaceCameras) { $SurfaceCameraPort } else { 'off' }) SURFACE_CAMERA_LOG=$(if ($SurfaceCameras) { $cameraBridgeLog } else { 'off' }) PERSISTENT_DISKS=$PersistentDisks DRY_RUN=True"
   for ($i = 0; $i -lt $arguments.Count; $i++) {
     "QEMU_ARG[$i]=$($arguments[$i])"
@@ -299,6 +312,19 @@ if ($DisplayBackend -eq 'gtk') {
   # Let the Android guest IME receive physical key events instead of the host IME.
   $start.Environment['KIKI_SDL_DISABLE_IME'] = '1'
   $start.Environment['KIKI_SDL_RAW_KEYBOARD_TRACE'] = if ($SdlKeyboardTrace) { '1' } else { '0' }
+  if ($BootConsole) {
+    [IO.File]::WriteAllText($bootStatus,
+      "[boot]`nstate=WAITING`nstage=Starting the virtual machine...`nverified=`n",
+      [Text.UTF8Encoding]::new($false))
+    $start.Environment['KIKI_SDL_BOOT_STATUS'] = $bootStatus
+    $start.Environment['KIKI_SDL_BOOT_EVENTS'] = $bootEvents
+    $start.Environment['KIKI_SDL_BOOT_SERIAL'] = $serial
+    $start.Environment['KIKI_SDL_BOOT_LOGCAT'] = $logcat
+    $start.Environment['KIKI_SDL_BOOT_SETUP'] = $displayLog
+    $start.Environment['KIKI_SDL_BOOT_DETAILS'] = "SDL | $GpuMode | WHPX | $GuestRefreshRateHz Hz guest | $VcpuCount vCPU | 4 GiB | $($PortraitWidthPixels)x$PortraitHeightPixels | audio $AudioBackend"
+  } else {
+    [void]$start.Environment.Remove('KIKI_SDL_BOOT_STATUS')
+  }
   if ($NativeResolution) {
     $start.Environment['KIKI_SDL_NATIVE_PIXELS'] = '1'
     $start.Environment['KIKI_SDL_START_WIDTH'] = [string]$PortraitWidthPixels
@@ -374,11 +400,11 @@ if ($SurfaceCameras) {
   }
 }
 $displayHelperPath = Join-Path $PSScriptRoot 'configure_kikiaosp_display.ps1'
-$displayLog = Join-Path $images "qemu-kikiaosp-$Tag.display.log"
-if (Test-Path -LiteralPath $displayLog) { throw "Refusing to overwrite $displayLog" }
 $pwshPath = (Get-Command pwsh -ErrorAction Stop).Source
-$helperArguments = "-NoProfile -File `"$displayHelperPath`" -Serial 127.0.0.1:5555 -LogPath `"$displayLog`" -DisplayWidthPixels $PortraitWidthPixels -DisplayHeightPixels $PortraitHeightPixels -DisplayDensityDpi 288 -FontScale 1.5"
+$helperArguments = "-NoProfile -File `"$displayHelperPath`" -Serial 127.0.0.1:5555 -LogPath `"$displayLog`" -DisplayWidthPixels $PortraitWidthPixels -DisplayHeightPixels $PortraitHeightPixels -DisplayDensityDpi 288 -FontScale 1.5 -GuestRefreshRateHz $GuestRefreshRateHz -TimeoutSeconds $BootTimeoutSeconds -QemuProcessId $($process.Id)"
+if ($BootConsole) { $helperArguments += " -BootStatusPath `"$bootStatus`"" }
 $displayProcess = Start-Process -FilePath $pwshPath -ArgumentList $helperArguments `
   -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru
 $keyboardDevice = if ($VirtioKeyboard) { 'virtio-keyboard-pci' } else { 'none' }
+"BOOT_CONSOLE=$BootConsole BOOT_STATUS=$(if ($BootConsole) { $bootStatus } else { 'off' }) BOOT_EVENTS=$(if ($BootConsole) { $bootEvents } else { 'off' })"
 "QEMU_PID=$($process.Id) QEMU_EXE=$qemu QEMU_SHA256=$qemuSha256 CAMERA_BRIDGE_PID=$($cameraBridgeProcess ? $cameraBridgeProcess.Id : 'off') CAMERA_BRIDGE_LOG=$(if ($SurfaceCameras) { $cameraBridgeLog } else { 'off' }) DISPLAY_BACKEND=$DisplayBackend AUDIO_BACKEND=$AudioBackend GTK_SWAP_INTERVAL=$GtkSwapInterval ANGLE_EGL=$AngleEgl DISPLAY_LOG=$displayLog SERIAL=$serial LOGCAT=$logcat QEMU_TRACE=$($TraceVirglFences -or $SdlKeyboardTrace ? $qemuTrace : 'off') SDL_KEY_TRACE=$SdlKeyboardTrace SDL_MOUSE_GRAB=$(if ($DisplayBackend -eq 'sdl') { 'disabled' } else { 'backend-default' }) GLOBAL_FPS_LOG=$($GlobalFpsProfile ? $globalFpsLog : 'off') GPU_MODE=$GpuMode HWC_MODE=$HwcMode RENDERENGINE_BACKEND=$RenderEngineBackend GPU_BLOB=$GpuBlob GUEST_REFRESH_RATE_HZ=$GuestRefreshRateHz VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel PARALLEL_PORT=disabled TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"

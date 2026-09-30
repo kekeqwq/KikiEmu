@@ -7,9 +7,11 @@
 !/GPU_ACCELERATION.md
 !/CAMERA_SUPPORT.md
 !/BASELINE_20260930.md
+!/BOOT_CONSOLE.md
 !/patches/
 /patches/*
 !/patches/qemu-kikiaosp-tested-surface-20260929.patch
+!/patches/qemu-sdl-boot-console.patch
 !/patches/qemu-windows-gtk-full-redraw.patch
 !/patches/qemu-windows-arm64-gtk-touch.patch
 !/patches/qemu-windows-gtk-glarea-wgl.patch
@@ -24,6 +26,7 @@
 !/profiles/gpu-virgl-native-20260927.json
 !/profiles/surface-camera-20260930.json
 !/profiles/surface-main-20260930.json
+!/profiles/surface-main-pre-boot-console-20260930.json
 !/tools/
 /tools/*
 !/tools/build_qemu_arm64.sh

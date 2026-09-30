@@ -1,5 +1,6 @@
 # Keep source patches byte-compatible with git apply in MSYS2.
-/patches/*.patch text eol=lf
+# Unified diffs require a space prefix even on empty context lines.
+/patches/*.patch text eol=lf whitespace=-blank-at-eol
 /tools/*.sh text eol=lf
 /tools/*.ps1 text eol=lf
 /profiles/*.json text eol=lf
@@ -7,5 +8,6 @@
 /CAMERA_SUPPORT.md text eol=lf
 /GPU_ACCELERATION.md text eol=lf
 /BASELINE_20260930.md text eol=lf
+/BOOT_CONSOLE.md text eol=lf
 /.gitignore text eol=lf
 /.gitattributes text eol=lf

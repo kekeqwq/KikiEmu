@@ -6,12 +6,36 @@ param(
   [ValidateRange(120, 640)][int]$DisplayDensityDpi = 288,
   [ValidateRange(0.5, 2.0)][double]$FontScale = 1.5,
   [ValidateRange(30, 120)][int]$GuestRefreshRateHz = 120,
+  [string]$BootStatusPath,
+  [int]$QemuProcessId,
   [ValidateRange(30, 600)][int]$TimeoutSeconds = 240
 )
 
 $ErrorActionPreference = 'Stop'
 $adbPath = (Get-Command adb -ErrorAction Stop).Source
 $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+
+function Set-BootStatus {
+  param([string]$State, [string]$Stage, [string]$Verified = '')
+  if (-not $script:BootStatusPath) { return }
+  $escape = {
+    param([string]$Value)
+    $Value.Replace('\', '\\').Replace("`r", '').Replace("`n", '\n')
+  }
+  $content = "[boot]`nstate=$State`nstage=$(& $escape $Stage)`nverified=$(& $escape $Verified)`n"
+  $temporaryPath = "$script:BootStatusPath.$PID.tmp"
+  [IO.File]::WriteAllText($temporaryPath, $content, [Text.UTF8Encoding]::new($false))
+  # The UI sees a complete state, never a half-written READY record.
+  for ($attempt = 0; $attempt -lt 5; $attempt++) {
+    try {
+      [IO.File]::Move($temporaryPath, $script:BootStatusPath, $true)
+      return
+    } catch [IO.IOException] {
+      if ($attempt -eq 4) { throw }
+      Start-Sleep -Milliseconds 50
+    }
+  }
+}
 
 function Invoke-Adb {
   param([string[]]$AdbArgumentList)
@@ -30,8 +54,12 @@ function Invoke-GuestShell {
 Start-Transcript -LiteralPath $LogPath -Force | Out-Null
 try {
   "Waiting for Android on $Serial"
-  Invoke-Adb -AdbArgumentList @('connect', $Serial)
+  Set-BootStatus 'WAITING' 'Waiting for Android ADB and boot_completed=1'
   while ([DateTime]::UtcNow -lt $deadline) {
+    if ($QemuProcessId -gt 0 -and -not (Get-Process -Id $QemuProcessId -ErrorAction SilentlyContinue)) {
+      throw "QEMU process $QemuProcessId exited before Android was ready"
+    }
+    & $script:adbPath connect $Serial 2>$null | Out-Null
     $stateOutput = & $script:adbPath -s $Serial get-state 2>$null
     $stateExit = $LASTEXITCODE
     if ($stateExit -eq 0 -and ($stateOutput | Out-String).Trim() -eq 'device') {
@@ -45,6 +73,7 @@ try {
     throw "Android did not finish booting within $TimeoutSeconds seconds"
   }
 
+  Set-BootStatus 'CONFIGURING' 'Android boot completed; configuring display and power'
   'Configuring a virtual, fully charged battery and virtual AC input'
   # Apply power and charge before exposing a battery; otherwise Android can
   # see a newly-present 0% battery and request shutdown between updates.
@@ -97,10 +126,30 @@ try {
     throw "Android did not switch its active render rate to $GuestRefreshRateHz Hz; active=$activeRefreshRate. Check that QEMU advertises the requested mode."
   }
 
+  if ($BootStatusPath) {
+    Set-BootStatus 'CONFIGURING' 'Display verified; waiting for the Launcher desktop'
+    $homeDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    $homeReady = $false
+    do {
+      $activities = (Invoke-GuestShell -ShellArgumentList @('dumpsys', 'activity', 'activities') | Out-String)
+      $layers = (Invoke-GuestShell -ShellArgumentList @('dumpsys', 'SurfaceFlinger', '--list') | Out-String)
+      $focusedHome = $activities -match 'mCurrentFocus=Window\{[^\r\n]*com\.android\.launcher3/'
+      $homeLayer = $layers -match 'com\.android\.launcher3/com\.android\.launcher3\.uioverrides\.QuickstepLauncher'
+      if ($focusedHome -and $homeLayer) { $homeReady = $true; break }
+      Start-Sleep -Seconds 1
+    } while ([DateTime]::UtcNow -lt $homeDeadline)
+    if (-not $homeReady) { throw 'Android booted, but Launcher HOME did not become focused and visible' }
+    $androidVersion = (Invoke-GuestShell -ShellArgumentList @('getprop', 'ro.build.version.release') | Out-String).Trim()
+    $kernelVersion = (Invoke-GuestShell -ShellArgumentList @('uname', '-r') | Out-String).Trim()
+    $verified = "Android $androidVersion | Linux $kernelVersion | active render $($activeRefreshRate.ToString('F2', [Globalization.CultureInfo]::InvariantCulture)) Hz | HOME visible"
+    Set-BootStatus 'READY' 'Desktop ready - opening Android...' $verified
+  }
+
   'DISPLAY_READY: guest_refresh={0}Hz active_render_rate={1:N2}Hz virtual_battery_full=true virtual_AC=true stay_awake=true lock_screen_disabled=true HOME_requested=true' -f `
     $GuestRefreshRateHz, $activeRefreshRate
 } catch {
   "DISPLAY_SETUP_FAILED: $_"
+  Set-BootStatus 'ERROR' ([string]$_)
   exit 1
 } finally {
   Stop-Transcript | Out-Null

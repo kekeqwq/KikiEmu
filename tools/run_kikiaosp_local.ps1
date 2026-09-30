@@ -4,6 +4,7 @@ param(
     [string]$BundleDir,
     [string]$QemuPath,
     [switch]$SurfaceCameras = $true,
+    [switch]$BootConsole,
     [switch]$ValidateAllAssets,
     [switch]$DryRun
 )
@@ -11,6 +12,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $profile = Get-Content -LiteralPath $ProfilePath -Raw | ConvertFrom-Json
+if (-not $PSBoundParameters.ContainsKey('BootConsole')) {
+    $BootConsole = [bool]$profile.display.bootConsole
+}
 if (-not $BundleDir) { $BundleDir = Join-Path $repoRoot $profile.bundleDirectory }
 if (-not $QemuPath) { $QemuPath = Join-Path $repoRoot $profile.qemuExe }
 $BundleDir = (Resolve-Path -LiteralPath $BundleDir).Path
@@ -37,4 +41,5 @@ Write-Host "BASELINE_PROFILE=$($profile.id) SYSTEM_SHA256=$($profile.system.sha2
     -ProductImage $profile.product.name -SystemExtImage $profile.systemExt.name `
     -SurfaceCameras:$SurfaceCameras -GpuMode $profile.display.gpu -DisplayBackend $profile.display.backend `
     -VcpuCount $profile.display.vcpu -GuestRefreshRateHz $profile.display.refreshRateHz `
-    -PortraitWidthPixels $profile.display.width -PortraitHeightPixels $profile.display.height -DryRun:$DryRun
+    -PortraitWidthPixels $profile.display.width -PortraitHeightPixels $profile.display.height `
+    -BootConsole:$BootConsole -DryRun:$DryRun

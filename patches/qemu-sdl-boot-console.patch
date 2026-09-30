@@ -1,0 +1,599 @@
+diff --git a/include/ui/sdl2.h b/include/ui/sdl2.h
+index 4cd9eb8..49b6461 100644
+--- a/include/ui/sdl2.h
++++ b/include/ui/sdl2.h
+@@ -54,6 +54,7 @@ struct sdl2_console {
+ #endif
+ #ifdef CONFIG_OPENGL
+     QemuGLShader *gls;
++    struct KikiBootConsole *boot_console;
+     egl_fb guest_fb;
+     egl_fb win_fb;
+     bool y0_top;
+@@ -110,4 +111,12 @@ void sdl2_gl_release_dmabuf(DisplayChangeListener *dcl,
+ bool sdl2_gl_has_dmabuf(DisplayChangeListener *dcl);
+ void sdl2_gl_console_init(struct sdl2_console *scon);
+ 
++#ifdef CONFIG_OPENGL
++bool sdl2_boot_console_requested(struct sdl2_console *scon);
++bool sdl2_boot_console_active(struct sdl2_console *scon);
++bool sdl2_boot_console_render(struct sdl2_console *scon,
++                              bool guest_frame, bool force);
++void sdl2_boot_console_destroy(struct sdl2_console *scon);
++#endif
++
+ #endif /* SDL2_H */
+diff --git a/ui/meson.build b/ui/meson.build
+index a283f78..81a3835 100644
+--- a/ui/meson.build
++++ b/ui/meson.build
+@@ -174,7 +174,7 @@ if sdl.found()
+     'sdl2-input.c',
+     'sdl2.c',
+   ))
+-  sdl_ss.add(when: opengl, if_true: files('sdl2-gl.c'))
++  sdl_ss.add(when: opengl, if_true: files('sdl2-gl.c', 'sdl2-boot-console.c'))
+   sdl_ss.add(when: x11, if_true: files('x_keymap.c'))
+   ui_modules += {'sdl' : sdl_ss}
+ endif
+diff --git a/ui/sdl2-boot-console.c b/ui/sdl2-boot-console.c
+new file mode 100644
+index 0000000..083cb92
+--- /dev/null
++++ b/ui/sdl2-boot-console.c
+@@ -0,0 +1,429 @@
++/*
++ * KikiAOSP native SDL boot console.
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ *
++ * This is a host UI surface, never the guest framebuffer. It is drawn before
++ * showing the same SDL window, and removed only after the launch helper has
++ * verified Android HOME/display readiness and a real guest scanout arrives.
++ * After handoff no log files are polled and no overlay is drawn.
++ */
++#include "qemu/osdep.h"
++#include <glib/gstdio.h>
++#include "ui/console.h"
++#include "ui/sdl2.h"
++#include "ui/shader.h"
++#include "ui/vgafont.h"
++
++#define BOOT_LINES 256
++#define BOOT_LINE_BYTES 512
++#define BOOT_POLL_US 100000
++#define BOOT_SUCCESS_US 1800000
++#define BOOT_BACKGROUND 0x00101924
++#define BOOT_TEXT 0x00c7d4e5
++#define BOOT_ACCENT 0x0051e2c2
++#define BOOT_MUTED 0x007c95b2
++#define BOOT_ERROR 0x00ff867b
++
++typedef struct BootLog {
++    const char *path;
++    const char *tag;
++    int fd;
++    char partial[BOOT_LINE_BYTES];
++    size_t used;
++} BootLog;
++
++typedef struct KikiBootConsole {
++    DisplaySurface *surface;
++    QemuGLShader *shader;
++    bool done;
++    bool ready;
++    bool failed;
++    bool ready_frame;
++    gint64 started_us;
++    gint64 last_poll_us;
++    gint64 ready_us;
++    guint total_lines;
++    char lines[BOOT_LINES][BOOT_LINE_BYTES];
++    char stage[BOOT_LINE_BYTES];
++    char details[BOOT_LINE_BYTES];
++    char verified[BOOT_LINE_BYTES];
++    BootLog logs[3];
++    FILE *events;
++} KikiBootConsole;
++
++bool sdl2_boot_console_requested(struct sdl2_console *scon)
++{
++    const char *path = g_getenv("KIKI_SDL_BOOT_STATUS");
++    return scon->opengl && scon->idx == 0 && path && *path;
++}
++
++bool sdl2_boot_console_active(struct sdl2_console *scon)
++{
++    return scon->boot_console && !scon->boot_console->done;
++}
++
++static void boot_event(KikiBootConsole *boot, const char *event)
++{
++    if (boot->events) {
++        fprintf(boot->events, "elapsed=%.3f event=%s\n",
++                (g_get_monotonic_time() - boot->started_us) / 1000000.0,
++                event);
++        fflush(boot->events);
++    }
++}
++
++static void boot_add_line(KikiBootConsole *boot, const char *tag,
++                          const char *line)
++{
++    char *destination;
++    if (!*line) {
++        return;
++    }
++    destination = boot->lines[boot->total_lines++ % BOOT_LINES];
++    g_snprintf(destination, BOOT_LINE_BYTES, "[%s] %s", tag, line);
++}
++
++static void boot_close_logs(KikiBootConsole *boot)
++{
++    int i;
++    for (i = 0; i < G_N_ELEMENTS(boot->logs); i++) {
++        if (boot->logs[i].fd >= 0) {
++            close(boot->logs[i].fd);
++            boot->logs[i].fd = -1;
++        }
++    }
++}
++
++static KikiBootConsole *boot_create(void)
++{
++    KikiBootConsole *boot = g_new0(KikiBootConsole, 1);
++    const char *event_path = g_getenv("KIKI_SDL_BOOT_EVENTS");
++    const char *details = g_getenv("KIKI_SDL_BOOT_DETAILS");
++    const char *paths[] = { "KIKI_SDL_BOOT_SERIAL", "KIKI_SDL_BOOT_LOGCAT",
++                           "KIKI_SDL_BOOT_SETUP" };
++    const char *tags[] = { "KRN", "AND", "HOST" };
++    int i;
++
++    boot->started_us = g_get_monotonic_time();
++    g_strlcpy(boot->stage, "Starting Linux and Android...",
++              sizeof(boot->stage));
++    g_strlcpy(boot->details, details ? details : "Native SDL Android guest",
++              sizeof(boot->details));
++    for (i = 0; i < G_N_ELEMENTS(boot->logs); i++) {
++        boot->logs[i].path = g_getenv(paths[i]);
++        boot->logs[i].tag = tags[i];
++        boot->logs[i].fd = -1;
++    }
++    if (event_path && *event_path) {
++        boot->events = fopen(event_path, "a");
++    }
++    boot_add_line(boot, "HOST", "KikiAOSP startup: live logs, not a countdown.");
++    boot_add_line(boot, "HOST", "Waiting for kernel, Android services and HOME.");
++    return boot;
++}
++
++static void boot_read_log(KikiBootConsole *boot, BootLog *log)
++{
++    char bytes[8192];
++    ssize_t count;
++    size_t i;
++
++    if (!log->path || !*log->path) {
++        return;
++    }
++    if (log->fd < 0) {
++        log->fd = g_open(log->path, O_RDONLY | O_BINARY, 0);
++        if (log->fd < 0) {
++            return;
++        }
++    }
++    /* A bounded regular-file read; never pipe/block the emulation loop. */
++    count = read(log->fd, bytes, sizeof(bytes));
++    for (i = 0; count > 0 && i < count; i++) {
++        unsigned char ch = bytes[i];
++        if (ch == '\n') {
++            log->partial[log->used] = 0;
++            boot_add_line(boot, log->tag, log->partial);
++            log->used = 0;
++        } else if (ch != '\r') {
++            if (log->used == sizeof(log->partial) - 12) {
++                log->partial[log->used] = 0;
++                boot_add_line(boot, log->tag, log->partial);
++                log->used = 0;
++            }
++            /* The builtin VGA font is ASCII; raw UTF-8 logs stay on disk. */
++            log->partial[log->used++] = ch == '\t' ? ' ' :
++                                      (ch >= 32 && ch < 127 ? ch : '.');
++        }
++    }
++}
++
++static void boot_read_field(GKeyFile *key, const char *name,
++                            char *buffer, size_t size)
++{
++    g_autofree char *value = g_key_file_get_string(key, "boot", name, NULL);
++    if (value) {
++        g_strlcpy(buffer, value, size);
++    }
++}
++
++static void boot_poll(KikiBootConsole *boot, gint64 now)
++{
++    g_autoptr(GKeyFile) key = g_key_file_new();
++    g_autofree char *state = NULL;
++    int i;
++
++    for (i = 0; i < G_N_ELEMENTS(boot->logs); i++) {
++        boot_read_log(boot, &boot->logs[i]);
++    }
++    if (!g_key_file_load_from_file(key, g_getenv("KIKI_SDL_BOOT_STATUS"),
++                                   G_KEY_FILE_NONE, NULL)) {
++        return;
++    }
++    state = g_key_file_get_string(key, "boot", "state", NULL);
++    boot_read_field(key, "stage", boot->stage, sizeof(boot->stage));
++    boot_read_field(key, "verified", boot->verified, sizeof(boot->verified));
++    if (g_strcmp0(state, "ERROR") == 0 && !boot->failed) {
++        boot->failed = true;
++        boot->ready = false;
++        boot_add_line(boot, "ERROR", boot->stage);
++        boot_event(boot, "STARTUP_FAILED");
++    } else if (g_strcmp0(state, "READY") == 0 &&
++               !boot->failed && !boot->ready) {
++        boot->ready = true;
++        boot->ready_us = now;
++        boot_add_line(boot, "READY", boot->verified);
++        boot_event(boot, "ANDROID_HOME_VERIFIED");
++    }
++}
++
++static void boot_text(DisplaySurface *surface, int x, int y,
++                       const char *text, int scale, uint32_t color)
++{
++    int width = surface_width(surface);
++    int height = surface_height(surface);
++    int stride = surface_stride(surface) / sizeof(uint32_t);
++    uint32_t *pixels = surface_data(surface);
++    const unsigned char *ch;
++    int row, column, dx, dy;
++
++    for (ch = (const unsigned char *)text; *ch; ch++, x += FONT_WIDTH * scale) {
++        unsigned char glyph = *ch < 128 ? *ch : '?';
++        if (x >= width) {
++            break;
++        }
++        for (row = 0; row < FONT_HEIGHT; row++) {
++            uint8_t bits = vgafont16[glyph * FONT_HEIGHT + row];
++            for (column = 0; column < FONT_WIDTH; column++) {
++                if (!(bits & (0x80 >> column))) {
++                    continue;
++                }
++                for (dy = 0; dy < scale; dy++) {
++                    int py = y + row * scale + dy;
++                    if (py < 0 || py >= height) {
++                        continue;
++                    }
++                    for (dx = 0; dx < scale; dx++) {
++                        int px = x + column * scale + dx;
++                        if (px >= 0 && px < width) {
++                            pixels[py * stride + px] = color;
++                        }
++                    }
++                }
++            }
++        }
++    }
++}
++
++static int boot_wrapped(DisplaySurface *surface, int x, int y,
++                         const char *text, int scale, uint32_t color,
++                         int columns, int limit)
++{
++    int rows = 0;
++    char line[BOOT_LINE_BYTES];
++    while (*text && rows < limit) {
++        size_t bytes = MIN(strlen(text), columns);
++        memcpy(line, text, bytes);
++        line[bytes] = 0;
++        boot_text(surface, x, y + rows * FONT_HEIGHT * scale,
++                    line, scale, color);
++        text += bytes;
++        rows++;
++    }
++    return rows;
++}
++
++static void boot_draw(KikiBootConsole *boot, int width, int height, gint64 now)
++{
++    /* Literal text blocks: K I K I A O S P. No image/font asset dependency. */
++    static const char *letters[8][7] = {
++        { "#   #", "#  # ", "# #  ", "##   ", "# #  ", "#  # ", "#   #" },
++        { "#####", "  #  ", "  #  ", "  #  ", "  #  ", "  #  ", "#####" },
++        { "#   #", "#  # ", "# #  ", "##   ", "# #  ", "#  # ", "#   #" },
++        { "#####", "  #  ", "  #  ", "  #  ", "  #  ", "  #  ", "#####" },
++        { " ### ", "#   #", "#   #", "#####", "#   #", "#   #", "#   #" },
++        { " ### ", "#   #", "#   #", "#   #", "#   #", "#   #", " ### " },
++        { " ####", "#    ", "#    ", " ### ", "    #", "    #", "#### " },
++        { "#### ", "#   #", "#   #", "#### ", "#    ", "#    ", "#    " }
++    };
++    DisplaySurface *surface = boot->surface;
++    uint32_t *pixels = surface_data(surface);
++    int stride = surface_stride(surface) / sizeof(uint32_t);
++    int scale = width >= 760 && height >= 640 ? 2 : 1;
++    int logo_scale = width >= 800 ? 2 : 1;
++    int margin = MAX(16, MIN(40, width / 24));
++    int columns = MIN(BOOT_LINE_BYTES - 1,
++                      MAX(1, (width - 2 * margin) / (FONT_WIDTH * scale)));
++    int header = 32 + 7 * FONT_HEIGHT * logo_scale + 3 * FONT_HEIGHT * scale;
++    int footer = height - 8 * FONT_HEIGHT * scale - margin;
++    int rows = MAX(0, (footer - header) / (FONT_HEIGHT * scale) - 1);
++    int x, y, letter, row, count, used = 0;
++    guint first, index;
++    char art[49], status[BOOT_LINE_BYTES];
++    g_autoptr(GPtrArray) visual = g_ptr_array_new_with_free_func(g_free);
++
++    for (y = 0; y < height; y++) {
++        for (x = 0; x < width; x++) {
++            pixels[y * stride + x] = BOOT_BACKGROUND;
++        }
++    }
++    for (row = 0; row < 7; row++) {
++        memset(art, ' ', sizeof(art) - 1);
++        for (letter = 0; letter < 8; letter++) {
++            memcpy(art + letter * 6, letters[letter][row], 5);
++        }
++        art[47] = 0;
++        boot_text(surface, MAX(0, (width - 47 * FONT_WIDTH * logo_scale) / 2),
++                    32 + row * FONT_HEIGHT * logo_scale, art, logo_scale,
++                    BOOT_ACCENT);
++    }
++    boot_text(surface, margin, header - 2 * FONT_HEIGHT * scale,
++                "KikiAOSP / native Android / live boot console", scale,
++                BOOT_TEXT);
++    boot_text(surface, margin, header - FONT_HEIGHT * scale,
++                "--- Linux [KRN] / Android [AND] / startup [HOST] ---",
++                scale, BOOT_MUTED);
++
++    first = boot->total_lines > BOOT_LINES ? boot->total_lines - BOOT_LINES : 0;
++    for (index = first; index < boot->total_lines; index++) {
++        const char *line = boot->lines[index % BOOT_LINES];
++        while (*line) {
++            size_t bytes = MIN(strlen(line), columns);
++            g_ptr_array_add(visual, g_strndup(line, bytes));
++            line += bytes;
++        }
++    }
++    count = MIN(rows, visual->len);
++    for (row = 0; row < count; row++) {
++        boot_text(surface, margin, header + row * FONT_HEIGHT * scale,
++                    g_ptr_array_index(visual, visual->len - count + row),
++                    scale, BOOT_TEXT);
++    }
++    g_snprintf(status, sizeof(status), "%s | %.1fs | %u log lines",
++                boot->failed ? "STARTUP FAILED" :
++                boot->ready ? "SYSTEM STARTED SUCCESSFULLY" : "BOOTING",
++                (now - boot->started_us) / 1000000.0, boot->total_lines);
++    used += boot_wrapped(surface, margin, footer, status, scale,
++                         boot->failed ? BOOT_ERROR : BOOT_ACCENT, columns, 2);
++    used += boot_wrapped(surface, margin, footer + used * FONT_HEIGHT * scale,
++                         boot->stage, scale, BOOT_TEXT, columns, 2);
++    used += boot_wrapped(surface, margin, footer + used * FONT_HEIGHT * scale,
++                         boot->details, scale, BOOT_MUTED, columns, 2);
++    boot_wrapped(surface, margin, footer + used * FONT_HEIGHT * scale,
++                  boot->verified, scale, BOOT_ACCENT, columns, 2);
++}
++
++bool sdl2_boot_console_render(struct sdl2_console *scon,
++                              bool guest_frame, bool force)
++{
++    KikiBootConsole *boot = scon->boot_console;
++    gint64 now;
++    int width, height;
++
++    if (!boot) {
++        if (!sdl2_boot_console_requested(scon)) {
++            return false;
++        }
++        boot = scon->boot_console = boot_create();
++    }
++    if (boot->done) {
++        return false;
++    }
++    now = g_get_monotonic_time();
++    if (now - boot->last_poll_us >= BOOT_POLL_US || force) {
++        boot_poll(boot, now);
++    }
++    if (guest_frame && boot->ready && !boot->failed) {
++        if (!boot->ready_frame) {
++            boot_event(boot, "VERIFIED_GUEST_SCANOUT");
++        }
++        boot->ready_frame = true;
++    }
++    if (boot->ready && boot->ready_frame && !boot->failed &&
++        now - boot->ready_us >= BOOT_SUCCESS_US) {
++        boot->done = true;
++        boot_close_logs(boot);
++        boot_event(boot, "DESKTOP_HANDOFF");
++        if (boot->events) {
++            fclose(boot->events);
++            boot->events = NULL;
++        }
++        SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
++        surface_gl_destroy_texture(boot->shader, boot->surface);
++        qemu_gl_fini_shader(boot->shader);
++        qemu_free_displaysurface(boot->surface);
++        boot->shader = NULL;
++        boot->surface = NULL;
++        return false;
++    }
++    if (!force && now - boot->last_poll_us < BOOT_POLL_US) {
++        return true;
++    }
++    boot->last_poll_us = now;
++    SDL_GL_GetDrawableSize(scon->real_window, &width, &height);
++    if (width <= 0 || height <= 0) {
++        return true;
++    }
++    SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
++    glBindFramebuffer(GL_FRAMEBUFFER, 0);
++    if (!boot->shader) {
++        boot->shader = qemu_gl_init_shader();
++    }
++    if (!boot->surface || surface_width(boot->surface) != width ||
++        surface_height(boot->surface) != height) {
++        surface_gl_destroy_texture(boot->shader, boot->surface);
++        qemu_free_displaysurface(boot->surface);
++        boot->surface = qemu_create_displaysurface(width, height);
++        boot_draw(boot, width, height, now);
++        surface_gl_create_texture(boot->shader, boot->surface);
++        boot_event(boot, "CONSOLE_SURFACE_CREATED");
++    } else {
++        boot_draw(boot, width, height, now);
++        surface_gl_update_texture(boot->shader, boot->surface,
++                                   0, 0, width, height);
++    }
++    surface_gl_setup_viewport(boot->shader, boot->surface, width, height);
++    surface_gl_render_texture(boot->shader, boot->surface);
++    SDL_GL_SwapWindow(scon->real_window);
++    return true;
++}
++
++void sdl2_boot_console_destroy(struct sdl2_console *scon)
++{
++    KikiBootConsole *boot = scon->boot_console;
++    if (!boot) {
++        return;
++    }
++    boot_close_logs(boot);
++    if (boot->events) {
++        fclose(boot->events);
++    }
++    if (boot->shader) {
++        SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
++        surface_gl_destroy_texture(boot->shader, boot->surface);
++        qemu_gl_fini_shader(boot->shader);
++    }
++    qemu_free_displaysurface(boot->surface);
++    g_free(boot);
++    scon->boot_console = NULL;
++}
+diff --git a/ui/sdl2-gl.c b/ui/sdl2-gl.c
+index f82bbf1..f8178eb 100644
+--- a/ui/sdl2-gl.c
++++ b/ui/sdl2-gl.c
+@@ -185,6 +185,10 @@ static void sdl2_gl_render_surface(struct sdl2_console *scon)
+ {
+     int ww, wh;
+ 
++    if (sdl2_boot_console_render(scon, false, false)) {
++        return;
++    }
++
+     SDL_GL_MakeCurrent(scon->real_window, scon->winctx);
+ 
+     SDL_GL_GetDrawableSize(scon->real_window, &ww, &wh);
+@@ -249,6 +253,14 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
+     assert(scon->opengl);
+ 
+     qemu_console_hw_update(dcl->con);
++    if (sdl2_boot_console_active(scon)) {
++        if (!sdl2_boot_console_render(scon, false, false)) {
++            /* HOME can be idle: explicitly present its retained scanout. */
++            sdl2_gl_redraw(scon);
++        }
++        sdl2_poll_events(scon);
++        return;
++    }
+     if (scon->updates && scon->real_window) {
+         scon->updates = 0;
+         sdl2_gl_render_surface(scon);
+@@ -260,6 +272,10 @@ void sdl2_gl_redraw(struct sdl2_console *scon)
+ {
+     assert(scon->opengl);
+ 
++    if (sdl2_boot_console_render(scon, false, true)) {
++        return;
++    }
++
+     if (scon->scanout_mode) {
+         /* sdl2_gl_scanout_flush actually only care about
+          * the first argument. */
+@@ -382,6 +398,10 @@ void sdl2_gl_scanout_flush(DisplayChangeListener *dcl,
+         return;
+     }
+ 
++    if (sdl2_boot_console_render(scon, true, false)) {
++        return;
++    }
++
+     if (profile) {
+         callback_start_us = g_get_monotonic_time();
+     }
+diff --git a/ui/sdl2.c b/ui/sdl2.c
+index 9458cc5..fa9fef7 100644
+--- a/ui/sdl2.c
++++ b/ui/sdl2.c
+@@ -340,6 +340,11 @@ static bool sdl2_handle_windows_pointer(SDL_SysWMmsg *sysmsg)
+     if (!scon || !qemu_console_is_graphic(scon->dcl.con)) {
+         return true;
+     }
++#ifdef CONFIG_OPENGL
++    if (sdl2_boot_console_active(scon)) {
++        return true;
++    }
++#endif
+     slot = sdl2_touch_slot_for_pointer(scon, pointer_id, false);
+ 
+     if (message == WM_POINTERCAPTURECHANGED) {
+@@ -458,6 +463,12 @@ void sdl2_window_create(struct sdl2_console *scon)
+     if (scon->hidden) {
+         flags |= SDL_WINDOW_HIDDEN;
+     }
++#ifdef CONFIG_OPENGL
++    if (sdl2_boot_console_requested(scon)) {
++        /* Paint the startup UI before exposing this same native window. */
++        flags |= SDL_WINDOW_HIDDEN;
++    }
++#endif
+ #ifdef CONFIG_OPENGL
+     if (scon->opengl) {
+         flags |= SDL_WINDOW_OPENGL;
+@@ -539,6 +550,15 @@ void sdl2_window_create(struct sdl2_console *scon)
+     }
+ 
+     sdl_update_caption(scon);
++#ifdef CONFIG_OPENGL
++    if (sdl2_boot_console_requested(scon)) {
++        sdl2_boot_console_render(scon, false, true);
++        if (!scon->hidden) {
++            SDL_ShowWindow(scon->real_window);
++            sdl2_boot_console_render(scon, false, true);
++        }
++    }
++#endif
+ }
+ 
+ void sdl2_window_destroy(struct sdl2_console *scon)
+@@ -548,6 +568,9 @@ void sdl2_window_destroy(struct sdl2_console *scon)
+     }
+ 
+     if (scon->winctx) {
++#ifdef CONFIG_OPENGL
++        sdl2_boot_console_destroy(scon);
++#endif
+         SDL_GL_DeleteContext(scon->winctx);
+         scon->winctx = NULL;
+     }
+@@ -1137,6 +1160,18 @@ void sdl2_poll_events(struct sdl2_console *scon)
+     }
+ 
+     while (SDL_PollEvent(ev)) {
++#ifdef CONFIG_OPENGL
++        if (ev->type == SDL_KEYDOWN || ev->type == SDL_KEYUP ||
++            ev->type == SDL_TEXTINPUT || ev->type == SDL_MOUSEMOTION ||
++            ev->type == SDL_MOUSEBUTTONDOWN || ev->type == SDL_MOUSEBUTTONUP ||
++            ev->type == SDL_MOUSEWHEEL) {
++            struct sdl2_console *input_console =
++                get_scon_from_window(ev->window.windowID);
++            if (input_console && sdl2_boot_console_active(input_console)) {
++                continue;
++            }
++        }
++#endif
+         switch (ev->type) {
+ #if defined(CONFIG_WIN32)
+         case SDL_SYSWMEVENT:
