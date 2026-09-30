@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include "session.hpp"
+#include "installation.hpp"
 #include <stdexcept>
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
@@ -12,6 +13,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         if (!words) throw std::runtime_error("Could not read desktop startup arguments.");
         struct Cleanup { wchar_t** words; ~Cleanup() { LocalFree(words); } } cleanup{words};
         auto paths = kiki::user_manager_paths();
+        kiki::InstallationLease installation(paths.appRoot);
         if (count == 1) { kiki::start_instance(paths); return 0; }
         if (count != 6 || std::wstring(words[1]) != L"--supervise" || std::wstring(words[2]) != L"--id" ||
             std::wstring(words[4]) != L"--session" || !kiki::valid_instance_uuid(kiki::utf8(words[5])))

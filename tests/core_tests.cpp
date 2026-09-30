@@ -18,6 +18,7 @@
 #include "../src/kikiemu/process.hpp"
 #include "../src/kikiemu/transport.hpp"
 #include "../src/kikiemu/session.hpp"
+#include "../src/kikiemu/installation.hpp"
 #include "package_contract.generated.hpp"
 #define LIBARCHIVE_STATIC
 #include <archive.h>
@@ -130,6 +131,12 @@ int wmain(int argc, wchar_t** argv) {
             throw std::runtime_error("Unsupported internal test argument.");
         check(parse_command({}).name == "help", "empty help");
         check(parse_command({L"--list"}).name == "list", "list alias");
+        check(add_path_segment(L"C:\\other;", L"C:\\KikiEmu") == L"C:\\other;;C:\\KikiEmu", "append preserves existing empty PATH segment");
+        check(add_path_segment(L"C:\\other; \"c:/kikiemu/\" ;C:\\last", L"C:\\KikiEmu") == L"C:\\other; \"c:/kikiemu/\" ;C:\\last", "equivalent existing PATH is not replaced");
+        check(remove_path_segment(L"C:\\other;;C:\\KikiEmu;C:\\last;", L"C:\\KikiEmu") == L"C:\\other;;C:\\last;", "remove only exact PATH segment, preserves unrelated bytes");
+        check(remove_path_segment(L"C:\\KikiEmu-dev;C:\\KikiEmu", L"C:\\KikiEmu") == L"C:\\KikiEmu-dev", "release PATH removal leaves dev prefix");
+        rejects([&] { add_path_segment(L"C:\\other", L"C:\\KikiEmu;C:\\foreign"); }, "PATH separator injection accepted");
+        rejects([&] { add_path_segment(std::wstring(32760, L'x'), L"C:\\KikiEmu"); }, "oversized PATH truncated/accepted");
         auto deletion = parse_command({L"--delete", L"--force", L"--id", L"01"});
         check(deletion.name == "delete" && deletion.options.at("force") == L"true" && deletion.options.at("id") == L"01", "delete force is a valueless flag");
         check(parse_command({L"delete", L"--id", L"01", L"--force"}).name == "delete", "delete subcommand option ordering");
@@ -244,6 +251,22 @@ int wmain(int argc, wchar_t** argv) {
         // Destructive checks use ONLY brand-new isolated temporary fixtures,
         // never development/user VM disks or the public CLI/installer registry.
         const auto temp = temporary_fixture_root();
+        auto appFixture = temp / "installed-app";
+        fs::create_directory(appFixture);
+        rejects([&] { InstallationLease missing(appFixture); }, "missing installation lease accepted");
+        write_fixture(appFixture / "install.lock", "");
+        {
+            InstallationLease running(appFixture), concurrent(appFixture);
+            HANDLE update = CreateFileW((appFixture / "install.lock").c_str(), GENERIC_READ | GENERIC_WRITE,
+                                       0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            check(update == INVALID_HANDLE_VALUE && GetLastError() == ERROR_SHARING_VIOLATION, "installer overwrites running app lease");
+        }
+        HANDLE update = CreateFileW((appFixture / "install.lock").c_str(), GENERIC_READ | GENERIC_WRITE,
+                                   0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        check(update != INVALID_HANDLE_VALUE, "idle installation cannot acquire exclusive update lease");
+        rejects([&] { InstallationLease blocked(appFixture); }, "app starts while installer holds exclusive lease");
+        CloseHandle(update);
+        fs::remove(appFixture / "install.lock"); fs::remove(appFixture);
         const auto storage = temp / L"实例 storage", neighbour = temp / L"unrelated.txt";
         fs::create_directory(storage); fs::create_directory(storage / "boot");
         write_fixture(storage / "phone.qcow2", "isolated fake disk, not a VM");

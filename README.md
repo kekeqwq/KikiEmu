@@ -175,6 +175,8 @@ QEMU 在后台无控制台运行。监控仅监听 `127.0.0.1:4447`，ADB `127.0
 
 ## 开发规则
 
+终端用户英文初始化/管理/删除/卸载说明见 [QUICK_START.md](QUICK_START.md)。发行安装器的构建、原生 ARM64 程序边界、运行中拒绝覆盖和保留用户数据的卸载约束见 [INSTALLER.md](INSTALLER.md)。只编译安装包、不执行它；setup.exe 与公开 CLI 的用户视角验收由用户进行。系统源码的独立发行构建同时在设备仓库推进，不能用开发资产代替干净系统 ZIP。
+
 0.1 Alpha 已进入独立发布分支实现，尚未产出已验收的 setup.exe/系统 ZIP，见 [RELEASE_PLAN.md](RELEASE_PLAN.md)。正式系统包仅交付干净构建的安装材料，不包含用户磁盘；客户端新建固定总容量、动态占用的持久化磁盘。现有冻结 bundle/collector 是开发回溯格式，不是公开发版格式。系统包合同由 kikiaosp_test 维护，格式/schema/语义校验及双方兼容性测试在首个原型通过后冻结。QEMU 通过 create/set --qemu 指定并校验，不强制内置。正式与开发版本的身份、独立运行库、数据、ADB/控制/相机端点隔离必须在0.1发布前完成；用户正式实例运行时推进开发的误操作防护是永久发布门槛。
 
 原生 SDL 启动控制台已通过实际启动和用户验收，纳入默认主线；Android/内核资产不变。遮罩前的冻结基线见 [surface-main-pre-boot-console-20260930.json](profiles/surface-main-pre-boot-console-20260930.json)，仅用于显式回溯。构建、状态判断和证据边界见 [BOOT_CONSOLE.md](BOOT_CONSOLE.md)。
