@@ -84,7 +84,7 @@ kikiemu --delete --force --id 01
 
 也接受 `kikiemu --create ...`、`kikiemu --set ...`。`create` 的 system/storage/size/qemu 四项必填；`--performance` 可选。`g` 表示 GiB；size 为手机总容量，创建后禁止修改。`--qemu` 指 **bin 目录**，不是 EXE 文件；该目录至少包含 `qemu-system-aarch64.exe`、`qemu-img.exe`、`qemu-io.exe`、配套第三方 DLL 和 `roms/`。兼容的路径变更不重装系统、不改用户磁盘，运行中的实例保持原配置，下次启动生效。
 
-删除接口为 `kikiemu --delete --force --id 01`，也接受 `kikiemu delete --force --id 01`。它不再询问确认：核验目标实例和 storage 所有权后，终止仅属于该实例的 QEMU/配套进程，永久删除其 storage 文件夹及全部数据；若为默认实例，同时清除默认设置。必须显式提供 ID 和 `--force`，不允许传入任意删除路径；路径/实例/进程身份不符时拒绝，不会清理其他实例、原始 ZIP 或用户提供的 QEMU。卸载启动器仍默认保留用户系统数据。完整事务与安全约束见 [发行规划](RELEASE_PLAN.md#explicit-destructive-instance-deletion)；该接口随管理器交付，当前不宣称 setup.exe 或公开 CLI 已完成。
+删除接口为 `kikiemu --delete --force --id 01`，也接受 `kikiemu delete --force --id 01`。它不再询问确认：核验目标实例和 storage 所有权后，终止仅属于该实例的 QEMU/配套进程，永久删除其 storage 文件夹及全部数据；若为默认实例，同时清除默认设置。必须显式提供 ID 和 `--force`，不允许传入任意删除路径；路径/实例/进程身份不符时拒绝，不会清理其他实例、原始 ZIP 或用户提供的 QEMU。卸载启动器仍默认保留用户系统数据。完整事务与安全约束见 [发行规划](RELEASE_PLAN.md#explicit-destructive-instance-deletion)。该接口已包含在编译好的候选 setup.exe 中；精确所属进程终止、运行中 storage lease 删除、默认注销及失败恢复通过内部检查，公开 CLI/delete 的用户验收仍待完成。
 
 从上面 CLANGARM64 环境按仓库固定提交/补丁构建到新的目录，避免覆盖已经绑定给正式实例的运行库：
 

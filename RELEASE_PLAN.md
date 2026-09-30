@@ -1,6 +1,6 @@
 # KikiEmu / KikiAOSP 0.1 Alpha release plan
 
-Status: implementation branch, 2026-10-01. Native internal disk-install/boot-cache, guarded storage/process deletion and journaled registry modules plus an icon master exist; no accepted release build, public manager/installer, setup.exe, format-1 ZIP, tag or GitHub Release yet. The accepted mainline remains the development rollback baseline.
+Status: implementation branch, 2026-10-01. A clean-source native ARM64 manager/desktop/camera and setup.exe candidate are compiled and handed to the user; 251 isolated internal checks pass. User installer/CLI acceptance has not been performed by the agent. Independent frozen Android 17 release output is building; the producer's guarded real-input ZIP recipe is implemented but no actual clean system ZIP, accepted release, tag or GitHub Release exists yet. The accepted mainline remains the development rollback baseline.
 
 ## Agreed requirements
 
