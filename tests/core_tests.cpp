@@ -13,6 +13,12 @@
 #include "../src/kikiemu/storage.hpp"
 #include "../src/kikiemu/lifecycle.hpp"
 #include "../src/kikiemu/registry.hpp"
+#include "../src/kikiemu/package.hpp"
+#include "../src/kikiemu/manager.hpp"
+#include "package_contract.generated.hpp"
+#define LIBARCHIVE_STATIC
+#include <archive.h>
+#include <archive_entry.h>
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -83,12 +89,31 @@ struct TestChild {
     }
     ~TestChild() { if (process) { if (WaitForSingleObject(process, 0) == WAIT_TIMEOUT) TerminateProcess(process, 1); CloseHandle(process); } }
 };
+static void fixture_zip(const kiki::fs::path& path, const std::vector<std::pair<std::string, std::string>>& files) {
+    archive* writer = archive_write_new();
+    if (!writer) throw std::runtime_error("Could not allocate test ZIP writer.");
+    struct Cleanup { archive* value; ~Cleanup() { archive_write_free(value); } } cleanup{writer};
+    if (archive_write_set_format_zip(writer) != ARCHIVE_OK ||
+        archive_write_set_options(writer, "zip:compression=store") != ARCHIVE_OK ||
+        archive_write_open_filename_w(writer, path.c_str()) != ARCHIVE_OK) throw std::runtime_error("Could not create fixture ZIP.");
+    for (const auto& [name, data] : files) {
+        archive_entry* entry = archive_entry_new();
+        archive_entry_set_pathname(entry, name.c_str()); archive_entry_set_filetype(entry, AE_IFREG);
+        archive_entry_set_perm(entry, 0644); archive_entry_set_size(entry, data.size()); archive_entry_set_mtime(entry, 315532800, 0);
+        int status = archive_write_header(writer, entry); archive_entry_free(entry);
+        if (status != ARCHIVE_OK || archive_write_data(writer, data.data(), data.size()) != static_cast<la_ssize_t>(data.size()))
+            throw std::runtime_error("Could not write fixture ZIP entry.");
+    }
+    if (archive_write_close(writer) != ARCHIVE_OK) throw std::runtime_error("Could not close fixture ZIP.");
+}
 int wmain(int argc, wchar_t** argv) {
     if (argc == 2 && std::wstring(argv[1]) == L"--owned-library-test-child") {
         Sleep(INFINITE); return 0;
     }
     try {
         using namespace kiki;
+        if (argc != 1 && !(argc == 3 && std::wstring(argv[1]) == L"--producer-package-fixture"))
+            throw std::runtime_error("Unsupported internal test argument.");
         check(parse_command({}).name == "help", "empty help");
         check(parse_command({L"--list"}).name == "list", "list alias");
         auto deletion = parse_command({L"--delete", L"--force", L"--id", L"01"});
@@ -147,6 +172,22 @@ int wmain(int argc, wchar_t** argv) {
               "distinct nested objects may use the same key");
         rejects([] { parse_json_document("{\"a\":1,\"a\":2}"); }, "top-level duplicate JSON key accepted");
         rejects([] { parse_json_document("{\"items\":[{\"a\":1,\"a\":2}]}"); }, "nested duplicate JSON key accepted");
+        rejects([] { parse_json_document("\xef\xbb\xbf{}"); }, "product JSON BOM accepted");
+        rejects([] { parse_json_document(std::string(100, '[') + "0" + std::string(100, ']')); }, "excessive JSON nesting accepted");
+        auto contractFixtures = parse_json_document(kiki_contract::fixtures);
+        auto contractValid = contractFixtures.at("validManifest");
+        check(validate_manifest(contractValid).size() == 7, "canonical producer metadata fixture accepted by native consumer");
+        for (const auto& mutation : contractFixtures.at("negativeMutations")) {
+            auto bad = contractValid;
+            bad[nlohmann::json::json_pointer(mutation.at("pointer").get<std::string>())] = mutation.at("value");
+            rejects([&] { validate_manifest(bad); }, mutation.at("name").get_ref<const std::string&>().c_str());
+        }
+        rejects([] { validate_schema(1, {{"anyOf", nlohmann::json::array()}}); }, "future schema vocabulary silently ignored");
+        rejects([] { validate_schema(1, {{"$ref", "https://untrusted.invalid/schema"}}); }, "external schema reference fetched/accepted");
+        check(!version_supported("0.1.0") && version_supported("0.1.0-alpha") && version_supported("0.0.9"), "alpha launcher version ordering");
+        check(version_supported("0.1.0-alpha.2", "0.1.0-alpha.10"), "numeric prerelease ordering");
+        rejects([] { version_supported("0.1.0-alpha.01"); }, "noncanonical numeric prerelease accepted");
+        check(sha256_text("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "text SHA-256 known vector");
         rejects([] { inspect_qemu(normalize_directory(L"./this-qemu-bin-does-not-exist")); }, "missing runtime accepted");
         std::map<std::string, uint64_t> payloads = {{"boot", 37130240}, {"system", 1109270528}, {"vendor", 101437440}};
         auto layout = plan_disk(200ULL << 30, payloads, 8ULL << 30);
@@ -240,11 +281,13 @@ int wmain(int argc, wchar_t** argv) {
         check(RemoveDirectoryW(alias.c_str()) != FALSE, "unlink test root alias only");
         TestChild child(executable);
         auto owned = describe_owned_process(child.pid, fs::path(executable), uuid, "release", "qemu");
+        check(owned_process_is_live(owned), "readonly status confirms exact owned live child");
         check(parse_owned_process(owned_process_json(owned)).creationTime == owned.creationTime, "process ownership round trip");
         auto selfSupervisor = describe_owned_process(GetCurrentProcessId(), fs::path(executable), uuid, "release", "supervisor");
         check(parse_owned_process(owned_process_json(selfSupervisor)).pid == GetCurrentProcessId(), "supervisor may read its own registered identity");
         rejects([&] { force_stop_owned(uuid, "release", {selfSupervisor}); }, "manager self-termination accepted");
         auto reused = owned; reused.creationTime += 1;
+        rejects([&] { owned_process_is_live(reused); }, "readonly status adopted a reused PID");
         rejects([&] { force_stop_owned(uuid, "release", {reused}); }, "PID reuse ignored");
         auto foreign = owned; foreign.instanceUuid = "2ec85e8d-7150-4a35-8dfe-49a1e6634fc4";
         rejects([&] { force_stop_owned(uuid, "release", {foreign}); }, "foreign process ownership accepted");
@@ -267,6 +310,7 @@ int wmain(int argc, wchar_t** argv) {
         delete_storage(owner, {}, [&] { force_stop_owned(uuid, "release", {owned}); stopped = true; });
         check(stopped && !fs::exists(storage) && WaitForSingleObject(child.process, 0) == WAIT_OBJECT_0,
               "exact owned child stopped before exact storage removal");
+        check(!owned_process_is_live(owned), "readonly status detects the exact child's exit");
         check(fs::exists(neighbour) && fs::exists(outside / "keep.txt"), "unrelated neighbours remain");
         const auto registryRoot = temp / "registry", fakeBin = temp / "qemu-bin";
         const auto instanceA = temp / "A", instanceB = temp / "B";
@@ -354,6 +398,121 @@ int wmain(int argc, wchar_t** argv) {
         write_fixture(savedRegistry, "{\"registryVersion\":1,\"channel\":\"release\",\"channel\":\"dev\",\"nextId\":1,\"defaultId\":null,\"instances\":{}}");
         rejects([&] { RegistryTransaction duplicateKeys(registryRoot, "release"); }, "duplicate registry keys accepted");
         write_fixture(savedRegistry, goodRegistry);
+        // Nonbootable ZIP fixture exercises the container/import pipeline, not
+        // a clean candidate, installer/CLI acceptance or Android launch.
+        std::string fixtureBoot(12288, '\0');
+        auto put32 = [&](size_t at, uint32_t value) { for (size_t i = 0; i < 4; ++i) fixtureBoot[at + i] = static_cast<char>(value >> (8 * i)); };
+        fixtureBoot.replace(0, 8, "ANDROID!"); put32(8, 64); put32(12, 32); put32(20, 1584); put32(40, 4);
+        fixtureBoot.replace(4096 + 56, 4, "ARM\x64"); put32(4096 + 24, 2);
+        fixtureBoot[8192] = '\x1f'; fixtureBoot[8193] = '\x8b'; fixtureBoot[8194] = 8;
+        std::string erofs(4096, '\0'); erofs.replace(1024, 4, "\xe2\xe1\xf5\xe0");
+        std::string aospXml = "<manifest><remote name=\"aosp\" fetch=\"https://android.googlesource.com/\"/><project name=\"platform/test\" path=\"test\" revision=\"" + std::string(40, 'a') + "\"/></manifest>";
+        nlohmann::json sourceLock = {
+            {"sourceLockVersion", 1},
+            {"contract", {{"repository", "https://github.com/kekeqwq/kikiaosp_test"}, {"revision", kiki_contract::producerRevision},
+                          {"manifestSchemaSha256", kiki_contract::manifestSha256}, {"sourceLockSchemaSha256", kiki_contract::sourceLockSha256}}},
+            {"aosp", {{"branch", "android17-release"}, {"manifestXml", aospXml}, {"manifestSha256", sha256_text(aospXml)}, {"projectCount", 1}}},
+            {"device", {{"repository", "https://github.com/kekeqwq/kikiaosp_test"}, {"commit", std::string(40, 'b')}}},
+            {"kernel", {{"repository", "https://github.com/kekeqwq/kikiaosp_kernel"}, {"commit", std::string(40, 'c')},
+                        {"flakeLockSha256", std::string(64, 'd')}, {"sourceVersion", "7.3-rc4"}, {"imageSha256", sha256_text(fixtureBoot.substr(4096, 64))}}},
+            {"build", {{"cleanSource", true}, {"independentOutput", true}, {"outputRecipe", "kikiaosp-release-v1"},
+                       {"tools", {{"mkbootfsSha256", std::string(64, 'e')}, {"mkbootimgSha256", std::string(64, 'f')}, {"mkfsErofsSha256", std::string(64, '0')}}}}}
+        };
+        validate_source_lock(sourceLock); ++passed;
+        auto badLock = sourceLock; badLock["aosp"]["manifestSha256"] = std::string(64, 'a');
+        rejects([&] { validate_source_lock(badLock); }, "AOSP manifest digest mismatch accepted");
+        badLock = sourceLock; badLock["aosp"]["projectCount"] = 2;
+        rejects([&] { validate_source_lock(badLock); }, "AOSP project count mismatch accepted");
+        badLock = sourceLock; badLock["aosp"]["manifestXml"] = aospXml.substr(0, aospXml.size() - 11) + "<project name=\"unpinned\" revision=\"main\"/></manifest>";
+        badLock["aosp"]["manifestSha256"] = sha256_text(badLock["aosp"]["manifestXml"].get<std::string>());
+        badLock["aosp"]["projectCount"] = 2;
+        rejects([&] { validate_source_lock(badLock); }, "floating AOSP project accepted");
+        auto actual = contractValid;
+        std::vector<std::pair<std::string, std::string>> zipFiles = {{"payload/boot.img", fixtureBoot},
+            {"payload/system.img", erofs}, {"payload/vendor.img", erofs}, {"provenance/source-lock.json", sourceLock.dump()},
+            {"licenses/aosp.txt", "SYNTHETIC internal fixture, not AOSP redistributable"},
+            {"licenses/kernel.txt", "SYNTHETIC internal fixture, not Linux redistributable"}};
+        for (auto& entry : actual["payloads"]) {
+            auto name = entry.at("path").get<std::string>();
+            for (const auto& [path, data] : zipFiles) if (path == name) { entry["bytes"] = data.size(); entry["sha256"] = sha256_text(data); }
+        }
+        for (auto* entry : {&actual["sourceLock"], &actual["licenses"][0], &actual["licenses"][1]}) {
+            for (const auto& [path, data] : zipFiles) if (path == entry->at("path").get<std::string>()) { (*entry)["bytes"] = data.size(); (*entry)["sha256"] = sha256_text(data); }
+        }
+        zipFiles.insert(zipFiles.begin(), {"manifest.json", actual.dump()});
+        const auto zipPath = temp / "contract-fixture-NOT-BOOTABLE.zip", stage = temp / "package-stage";
+        fixture_zip(zipPath, zipFiles);
+        auto package = read_system_package(zipPath, stage);
+        check(package.manifest == actual && package.payloads.size() == 3 && package.archiveSha256 == sha256(zipPath), "native ZIP reader validates and stages only declared synthetic files");
+        check(sha256(package.payloads.at("boot")) == sha256_text(fixtureBoot), "ZIP binary readback retains NUL/CRLF/byte identity");
+        rejects([&] { read_system_package(zipPath, stage); }, "existing staging destination overwritten");
+        delete_storage(package.stagingOwner, {zipPath}, [] {});
+        auto duplicateFiles = zipFiles; duplicateFiles.push_back(zipFiles[0]); fixture_zip(zipPath, duplicateFiles);
+        rejects([&] { read_system_package(zipPath, stage); }, "duplicate raw archive name accepted");
+        check(!fs::exists(stage), "duplicate archive rejected before staging");
+        auto forbiddenFiles = zipFiles; forbiddenFiles.push_back({"userdata.img", "do not ship used disks"}); fixture_zip(zipPath, forbiddenFiles);
+        rejects([&] { read_system_package(zipPath, stage); }, "userdata archive entry accepted");
+        auto wrongHash = zipFiles; auto corruptManifest = actual; corruptManifest["payloads"][0]["sha256"] = std::string(64, '0');
+        wrongHash[0].second = corruptManifest.dump(); fixture_zip(zipPath, wrongHash);
+        rejects([&] { read_system_package(zipPath, stage); }, "corrupt payload hash accepted");
+        check(!fs::exists(stage), "failed extraction removes only its freshly created owned staging");
+        fixture_zip(zipPath, zipFiles);
+        std::ifstream zipInput(zipPath, std::ios::binary);
+        std::string validZip((std::istreambuf_iterator<char>(zipInput)), {}); zipInput.close();
+        for (auto altered : {std::string("MZ-hidden-executable") + validZip, validZip + "trailer", validZip.substr(0, validZip.size() - 1)}) {
+            write_fixture(zipPath, altered);
+            rejects([&] { read_system_package(zipPath, stage); }, "noncanonical raw ZIP framing accepted");
+        }
+        auto mismatchZip = validZip; mismatchZip[30] = 'x'; write_fixture(zipPath, mismatchZip);
+        rejects([&] { read_system_package(zipPath, stage); }, "local/central archive pathname disagreement accepted");
+        auto nulZip = validZip; auto centralAt = nulZip.find("PK\x01\x02");
+        check(centralAt != std::string::npos, "fixture central directory present");
+        nulZip[centralAt + 46 + 4] = '\0'; write_fixture(zipPath, nulZip);
+        rejects([&] { read_system_package(zipPath, stage); }, "raw embedded-NUL archive pathname accepted");
+        check(!fs::exists(stage), "noncanonical ZIP mutations rejected before any staging");
+        if (argc == 3) {
+            auto cross = read_system_package(normalize_directory(argv[2]), stage);
+            check(cross.payloads.size() == 3 && cross.manifest.at("channel") == "release", "producer deflate/local-ZIP64 synthetic fixture accepted by native reader");
+            delete_storage(cross.stagingOwner, {normalize_directory(argv[2])}, [] {});
+        }
+        fs::remove(zipPath);
+        auto managerRoot = temp / "manager-api", managerDisk = temp / "manager-api-disk";
+        ManagerPaths manager{managerRoot, temp / "app-fixture", "release"};
+        const auto createdOwner = create_storage(managerDisk, new_instance_uuid(), "release", {fakeBin, managerRoot, manager.appRoot});
+        {
+            StorageLease lease(createdOwner);
+            check(!MoveFileExW(managerDisk.c_str(), (temp / "renamed-manager-api-disk").c_str(), 0), "storage lease pins directory during install/start");
+            rejects([&] { delete_storage(createdOwner, {}, [] {}); }, "storage removed while an installation lease is active");
+        }
+        rejects([&] { create_storage(managerDisk, new_instance_uuid(), "release", {}); }, "create adopted preexisting storage");
+        verify_storage_owner(createdOwner); ++passed;
+        {
+            RegistryTransaction registry(managerRoot, "release");
+            registry.register_installed(createdOwner, {{"layout", {{"totalBytes", 200ULL << 30}}}},
+                                        {{"binDirectory", utf8(fakeBin.wstring())}}, Resources{6, 8ULL << 30, "custom"});
+        }
+        auto listing = execute_management(parse_command({L"list"}), manager);
+        check(listing.find("200g  6  VirGL  8g  idle") != std::string::npos, "manager API lists immutable total and saved resources");
+        check(execute_management(parse_command({L"set", L"--default", L"01"}), manager) == "Set default system to 01\n", "manager API sets default");
+        check(execute_management(parse_command({L"--set", L"--id", L"01", L"--mem", L"4g"}), manager).find("next start") != std::string::npos,
+              "manager API reports deferred next-start settings");
+        rejects([&] { execute_management(parse_command({L"set", L"--id", L"01", L"--qemu", fakeBin.wstring(), L"--cpus", L"10"}), manager); },
+                "invalid QEMU binding committed a partial settings change");
+        {
+            RegistryTransaction registry(managerRoot, "release");
+            const auto& config = registry.instance("01").at("configuration").at("resources");
+            check(config.at("cpus") == 6 && config.at("memoryBytes") == 4ULL << 30, "manager API preserves CPU and commits no invalid partial QEMU/resource changes");
+        }
+        rejects([&] { execute_management({"delete", {{"id", L"01"}}}, manager); }, "manager API bypassed explicit force requirement");
+        check(fs::exists(managerDisk), "missing force leaves instance storage untouched");
+        check(execute_management(parse_command({L"--delete", L"--force", L"--id", L"01"}), manager) ==
+              "Deleted instance 01 and its storage.\nDefault system cleared.\n", "exact requested delete spelling reaches guarded registered-instance deletion");
+        {
+            RegistryTransaction registry(managerRoot, "release");
+            check(registry.state().at("instances").empty() && registry.state().at("defaultId").is_null() && !fs::exists(managerDisk),
+                  "manager API deletion persists unregister/default cleanup and removes only its fixture storage");
+        }
+        fs::remove(managerRoot / "registry.json"); fs::remove(managerRoot / "registry.lock"); fs::remove(managerRoot);
         // Exact, nonrecursive cleanup of the remaining fixtures we just created.
         fs::remove(neighbour); fs::remove(outside / "keep.txt"); fs::remove(outside);
         fs::remove(registryRoot / "registry.json"); fs::remove(registryRoot / "registry.lock");

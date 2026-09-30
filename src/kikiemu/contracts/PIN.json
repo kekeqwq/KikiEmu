@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/kekeqwq/kikiaosp_test",
+  "revision": "5cfd0a94c1b267661d2ae96bdc3875365ad686cf",
+  "formatVersion": 1,
+  "status": "implementation-draft-not-released",
+  "files": {
+    "format-1/manifest.schema.json": "beca6d7e4994881da3f057d11e54213ba600de67fc88cd01af3cb6f9edeaed25",
+    "format-1/source-lock.schema.json": "023557c5bde711ef6721f7637f6316ca2f84fef983449c1212aa20c088232953",
+    "format-1/fixtures.json": "0b8ed3b7116f7075175c82f77977dc4f96cc64cc167ddddc8970079f84222674"
+  }
+}

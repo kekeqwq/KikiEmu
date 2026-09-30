@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kekeqwq/kikiaosp_test/contracts/format-1/manifest.schema.json",
+  "title": "KikiAOSP format 1 manifest (implementation draft)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "formatVersion", "systemVersion", "product", "channel", "architecture", "pageSizeBytes", "runtimeAbi", "minimumLauncherVersion", "layoutVersion", "sectorSizeBytes", "alignmentBytes", "minimumDataBytes", "payloads", "sourceLock", "licenses", "buildIdentity", "requiredFeatures"],
+  "properties": {
+    "kind": {"const": "org.kiki.kikiaosp.system"},
+    "formatVersion": {"type": "integer", "const": 1},
+    "systemVersion": {"$ref": "#/$defs/version"},
+    "product": {"const": "kikiaosp_test"},
+    "channel": {"const": "release"},
+    "architecture": {"const": "aarch64"},
+    "pageSizeBytes": {"type": "integer", "const": 4096},
+    "runtimeAbi": {"const": "kiki-arm64-whpx-virgl-gpt-v1"},
+    "minimumLauncherVersion": {"$ref": "#/$defs/version"},
+    "layoutVersion": {"const": "gpt-v1"},
+    "sectorSizeBytes": {"type": "integer", "const": 512},
+    "alignmentBytes": {"type": "integer", "const": 1048576},
+    "minimumDataBytes": {"type": "integer", "const": 8589934592},
+    "payloads": {
+      "type": "array", "minItems": 3, "maxItems": 3,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["role", "path", "imageFormat", "bytes", "sha256", "partitionBytes"],
+        "properties": {
+          "role": {"enum": ["boot", "system", "vendor"]},
+          "path": {"enum": ["payload/boot.img", "payload/system.img", "payload/vendor.img"]},
+          "imageFormat": {"enum": ["android-boot-v4", "raw-erofs"]},
+          "bytes": {"type": "integer", "minimum": 4096, "maximum": 17179869184, "multipleOf": 4096},
+          "sha256": {"$ref": "#/$defs/sha256"},
+          "partitionBytes": {"type": "integer", "minimum": 1048576, "maximum": 17179869184, "multipleOf": 1048576}
+        }
+      }
+    },
+    "sourceLock": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "bytes", "sha256"],
+      "properties": {
+        "path": {"const": "provenance/source-lock.json"},
+        "bytes": {"type": "integer", "minimum": 1, "maximum": 8388608},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "licenses": {
+      "type": "array", "minItems": 2, "maxItems": 64,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["path", "bytes", "sha256"],
+        "properties": {
+          "path": {"type": "string", "minLength": 14, "maxLength": 128, "pattern": "^licenses/[a-z0-9][a-z0-9_-]*[.]txt$"},
+          "bytes": {"type": "integer", "minimum": 1, "maximum": 4194304},
+          "sha256": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    },
+    "buildIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["displayVersion", "model", "fingerprint", "androidVersion", "kernelVersion"],
+      "properties": {
+        "displayVersion": {"type": "string", "minLength": 12, "maxLength": 80, "pattern": "^KikiAOSP [0-9][A-Za-z0-9 .-]+$"},
+        "model": {"type": "string", "minLength": 12, "maxLength": 80, "pattern": "^KikiAOSP [0-9][A-Za-z0-9 .-]+$"},
+        "fingerprint": {"type": "string", "maxLength": 256, "pattern": "^KikiAOSP/kikiaosp_test/kikiaosp_test:17/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+:userdebug/test-keys$"},
+        "androidVersion": {"const": "17"},
+        "kernelVersion": {"type": "string", "minLength": 5, "maxLength": 64, "pattern": "^[0-9]+[.][0-9]+[.][0-9]+[-A-Za-z0-9._]*$"}
+      }
+    },
+    "requiredFeatures": {
+      "type": "array", "minItems": 9, "maxItems": 9, "uniqueItems": true,
+      "items": {"enum": ["boot-v4-direct", "gpt-v1", "fresh-f2fs", "exact-total-storage", "sdl-native-pixels", "virgl", "guest-120hz", "instance-isolation-v1", "surface-camera-v1"]}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"},
+    "version": {"type": "string", "minLength": 5, "maxLength": 64, "pattern": "^[0-9]+[.][0-9]+[.][0-9]+(-[a-z0-9][a-z0-9.-]*)?$"}
+  }
+}

@@ -19,6 +19,9 @@ OwnedProcess parse_owned_process(const nlohmann::json& value);
 OwnedProcess describe_owned_process(uint32_t pid, const fs::path& expectedExe,
                                    const std::string& uuid, const std::string& channel,
                                    const std::string& role);
+// Read-only liveness check of the SAME guarded identity, not PID/name alone.
+// Absent/exited returns false; a live reused/changed PID throws.
+bool owned_process_is_live(const OwnedProcess& process);
 
 struct OwnedEndpoint { uint32_t pid; uint16_t port; };
 // Check IPv4 loopback listeners against the OS owner table. Missing listeners

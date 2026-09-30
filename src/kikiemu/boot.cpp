@@ -30,8 +30,7 @@ BootHeader parse_boot_header(const std::array<unsigned char, 4096>& bytes, uint6
     if (fileBytes != expected) throw std::runtime_error("Boot payload is truncated or contains unsupported trailing data.");
     return {kernel, ramdisk, ramdiskOffset, expected};
 }
-nlohmann::json derive_boot_cache(const fs::path& payload, const fs::path& newDirectory) {
-    if (fs::exists(newDirectory)) throw std::runtime_error("Direct-boot cache destination already exists.");
+BootHeader validate_boot_payload(const fs::path& payload) {
     std::ifstream input(payload, std::ios::binary);
     std::array<unsigned char, 4096> bytes{};
     if (!input.read(reinterpret_cast<char*>(bytes.data()), bytes.size())) throw std::runtime_error("Truncated boot payload header.");
@@ -45,6 +44,12 @@ nlohmann::json derive_boot_cache(const fs::path& payload, const fs::path& newDir
     unsigned char gzip[3];
     if (!input.read(reinterpret_cast<char*>(gzip), 3) || gzip[0] != 0x1f || gzip[1] != 0x8b || gzip[2] != 8)
         throw std::runtime_error("Boot ramdisk must use the tracked gzip initramfs ABI.");
+    return header;
+}
+nlohmann::json derive_boot_cache(const fs::path& payload, const fs::path& newDirectory) {
+    if (fs::exists(newDirectory)) throw std::runtime_error("Direct-boot cache destination already exists.");
+    auto header = validate_boot_payload(payload);
+    std::ifstream input(payload, std::ios::binary);
     auto expected = sha256(payload);
     fs::create_directories(newDirectory);
     auto copy = [&](const wchar_t* name, uint64_t offset, uint64_t length) {

@@ -71,6 +71,21 @@ OwnedProcess describe_owned_process(uint32_t pid, const fs::path& expectedExe,
     OwnedProcess result{uuid, channel, role, pid, created(process.value), actual, sha256(actual)};
     fields(result); return result;
 }
+bool owned_process_is_live(const OwnedProcess& record) {
+    fields(record);
+    Handle process{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, record.pid)};
+    if (!process.value) {
+        if (GetLastError() == ERROR_INVALID_PARAMETER) return false;
+        throw std::runtime_error("Could not inspect registered process liveness.");
+    }
+    const auto status = WaitForSingleObject(process.value, 0);
+    if (status == WAIT_OBJECT_0) return false;
+    if (status != WAIT_TIMEOUT || created(process.value) != record.creationTime ||
+        _wcsicmp(executable(process.value).lexically_normal().c_str(), record.executable.lexically_normal().c_str()) ||
+        sha256(record.executable) != record.executableSha256)
+        throw std::runtime_error("Registered live process identity changed; operation refused.");
+    return true;
+}
 void verify_owned_endpoints(const std::vector<OwnedProcess>& processes,
                             const std::vector<OwnedEndpoint>& endpoints) {
     if (endpoints.empty()) return;

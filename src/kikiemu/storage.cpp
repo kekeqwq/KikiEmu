@@ -191,6 +191,36 @@ StorageIdentity claim_storage(const fs::path& directory, const std::string& uuid
     write_owner(identity);
     return identity;
 }
+StorageIdentity create_storage(const fs::path& directory, const std::string& uuid, const std::string& channel,
+                               const std::vector<fs::path>& protectedTrees) {
+    StorageIdentity identity{directory, uuid, channel, 0, 0};
+    check_identity_fields(identity); safe_target(directory, protectedTrees);
+    auto parents = pin_ancestors(directory);
+    if (!CreateDirectoryW(extended(directory).c_str(), nullptr))
+        throw failure("Storage destination must be a NEW directory with an existing parent");
+    auto root = open_path(directory, FILE_READ_ATTRIBUTES);
+    auto info = information(root->value);
+    identity.volumeSerial = info.dwVolumeSerialNumber; identity.directoryFileId = file_id(info);
+    write_owner(identity); return identity;
+}
+struct StorageLease::Impl {
+    std::vector<Held> parents;
+    Held root, marker;
+};
+StorageLease::StorageLease(const StorageIdentity& identity, const std::vector<fs::path>& protectedTrees)
+    : impl(std::make_unique<Impl>()) {
+    check_identity_fields(identity); safe_target(identity.directory, protectedTrees);
+    impl->parents = pin_ancestors(identity.directory);
+    impl->root = open_path(identity.directory, FILE_READ_ATTRIBUTES);
+    const auto info = information(impl->root->value);
+    if (!(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || info.dwVolumeSerialNumber != identity.volumeSerial ||
+        file_id(info) != identity.directoryFileId)
+        throw std::runtime_error("Registered storage directory identity changed; operation refused.");
+    impl->marker = open_path(identity.directory / ownerName, GENERIC_READ | FILE_READ_ATTRIBUTES);
+    if (read_owner(impl->marker->value) != storage_identity_json(identity))
+        throw std::runtime_error("Storage ownership does not match the manager registration.");
+}
+StorageLease::~StorageLease() = default;
 json storage_identity_json(const StorageIdentity& identity) {
     return {{"ownerVersion", 1}, {"directory", utf8(identity.directory.wstring())},
             {"instanceUuid", identity.instanceUuid}, {"channel", identity.channel},
@@ -211,16 +241,7 @@ StorageIdentity parse_storage_identity(const json& value) {
     check_identity_fields(identity); return identity;
 }
 void verify_storage_owner(const StorageIdentity& identity, const std::vector<fs::path>& protectedTrees) {
-    check_identity_fields(identity); safe_target(identity.directory, protectedTrees);
-    auto parents = pin_ancestors(identity.directory);
-    auto root = open_path(identity.directory, FILE_READ_ATTRIBUTES);
-    const auto info = information(root->value);
-    if (!(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || info.dwVolumeSerialNumber != identity.volumeSerial ||
-        file_id(info) != identity.directoryFileId)
-        throw std::runtime_error("Registered storage directory identity changed; operation refused.");
-    auto marker = open_path(identity.directory / ownerName, GENERIC_READ | FILE_READ_ATTRIBUTES);
-    if (read_owner(marker->value) != storage_identity_json(identity))
-        throw std::runtime_error("Storage ownership does not match the manager registration.");
+    StorageLease lease(identity, protectedTrees);
 }
 bool storage_target_missing(const StorageIdentity& identity, const std::vector<fs::path>& protectedTrees) {
     check_identity_fields(identity); safe_target(identity.directory, protectedTrees);

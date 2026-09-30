@@ -32,4 +32,5 @@ std::string utf8(const std::wstring& value);
 std::wstring utf16(const std::string& value);
 std::wstring quote_windows_arg(const std::wstring& value);
 bool valid_instance_uuid(const std::string& value);
+std::string new_instance_uuid();
 } // namespace kiki

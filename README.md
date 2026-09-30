@@ -113,7 +113,13 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH  # 仅当前开发终端，�
 
 ### 内部单盘系统原型（不是用户验收入口）
 
-`src/kikiemu` 已包含原生 ARM64 参数/运行目录检查、受限子进程、GPT 规划、按需增长 QCOW2 安装及 boot-v4 缓存提取模块，并新增安全 storage 删除、精确进程/端点核验、锁定与原子保存的实例记录和删除失败恢复事务。内部库测试137项通过：删除相关检查只使用新建临时目录及一次性测试子进程，未触碰真实 Android 磁盘或用户配置。另修正只设置内存/CPU时保留其他已设资源值。`kikiemu-disk-prototype.exe` 仍只供开发者测试**系统磁盘**，不写用户管理器记录、不安装 setup.exe、不启动虚拟机；它不是已交付的 `kikiemu create` 或完整公开 CLI。
+`src/kikiemu` 已包含原生 ARM64 参数/运行目录检查、受限子进程、GPT/动态 QCOW2 安装、boot-v4 缓存、安全 storage 删除、精确进程/端点核验、原子实例记录和失败恢复事务。发布分支新增共用 schema/语义检查、受限 ZIP 读取器及管理器分发：create 安装模块，list、set、info、doctor 和 `--delete --force --id` 已接入；缺少显式删除意图时底层接口同样拒绝。只设置内存/CPU 保留其他已设资源值，QEMU 路径检查失败不提交部分配置。
+
+内部检查只使用新建 TEMP fixtures 和自建测试子进程，不运行公开 CLI 的用户验收、不安装 setup.exe、不改用户 PATH 或真实 Android 数据。管理器组件可编译，但桌面/runtime supervisor、完整中断创建恢复、干净发行包、setup.exe 和正式/Dev 并行系统验收仍未完成，不能把该开发组件当作已交付产品。`kikiemu-disk-prototype.exe` 仍是只供开发者测试**系统磁盘**的入口。
+
+共用合同从设备仓库 commit `5cfd0a94c1b267661d2ae96bdc3875365ad686cf` 固定引入，见 [PIN.json](src/kikiemu/contracts/PIN.json)；构建时核对三个 JSON 文件的 SHA-256，再嵌入本机程序。ZIP/ZIP64 只允许规定文件、store/deflate、普通文件及一致的 local/central 名称；拒绝 SFX、重复/截断/NUL/路径跳转、隐藏附加文件、未知角色、开发身份或错误 ABI。长度、哈希、AOSP XML 精确项目提交、4K ARM64 boot/gzip 和 raw EROFS 再作语义核验，禁止执行包内代码。这里的测试 ZIP 是明确标记的非可启动假数据，绝不是用户需要的系统包。
+
+原生组件构建依赖 MSYS2 CLANGARM64 的 clang、nlohmann-json、libarchive、expat 及其依赖；运行 `tools/build_kikiemu_core.ps1 -RunUnitTests`。共享核心编译一次供四个入口复用。libarchive/expat 静态链接；MSYS2 的 libarchive 仍导入 zlib，构建脚本将原生 `zlib1.dll` 私有复制在 EXE 旁，不依赖用户 MSYS2/PATH。最终发行必须补齐静态/动态依赖的原许可和源码义务审计。
 
 32 GiB 原型磁盘启动前约占1.16 GiB；GPT、boot/system/vendor 逐块读回校验及 QCOW2 检查通过，没有 backing file 或旧 userdata。首次系统启动发现上游 init 的 boot UUID 分类漏掉 virtio-blk，已在设备仓库追踪最小修补并重建。修正后单盘实际启动进入 SDL/VirGL/120Hz 桌面，剩余容量首次格式化为 F2FS，跨正常关机/重启的数据标记保持不变。
 

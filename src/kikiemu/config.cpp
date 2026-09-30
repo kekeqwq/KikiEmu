@@ -43,6 +43,14 @@ bool valid_instance_uuid(const std::string& value) {
     }
     return true;
 }
+std::string new_instance_uuid() {
+    GUID value{}; wchar_t text[40];
+    if (FAILED(CoCreateGuid(&value)) || !StringFromGUID2(value, text, 40))
+        throw std::runtime_error("Could not allocate an instance identity.");
+    auto result = utf8(std::wstring(text + 1, 36));
+    std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return result;
+}
 static uint64_t positive_integer(const std::wstring& value) {
     if (value.empty()) throw std::runtime_error("Expected a positive integer.");
     uint64_t number = 0;

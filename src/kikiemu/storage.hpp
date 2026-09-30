@@ -2,6 +2,7 @@
 #pragma once
 #include "runtime.hpp"
 #include <functional>
+#include <memory>
 
 namespace kiki {
 struct StorageIdentity {
@@ -17,6 +18,21 @@ struct StorageIdentity {
 StorageIdentity claim_storage(const fs::path& directory, const std::string& instanceUuid,
                               const std::string& channel,
                               const std::vector<fs::path>& protectedTrees = {});
+// Create only a new final directory; its parent must already exist. Validate
+// protected paths and pin ancestors BEFORE creating anything at this target.
+StorageIdentity create_storage(const fs::path& directory, const std::string& instanceUuid,
+                               const std::string& channel, const std::vector<fs::path>& protectedTrees);
+// Hold the verified ancestors/root/marker throughout an install/start. Release
+// this lease before deletion; a check followed by unpinned writes is unsafe.
+class StorageLease {
+public:
+    StorageLease(const StorageIdentity& identity, const std::vector<fs::path>& protectedTrees = {});
+    ~StorageLease();
+    StorageLease(const StorageLease&) = delete;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl;
+};
 nlohmann::json storage_identity_json(const StorageIdentity& identity);
 StorageIdentity parse_storage_identity(const nlohmann::json& value);
 void verify_storage_owner(const StorageIdentity& identity, const std::vector<fs::path>& protectedTrees = {});

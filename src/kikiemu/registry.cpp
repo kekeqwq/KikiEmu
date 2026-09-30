@@ -62,6 +62,8 @@ void validate(const json& state, const std::string& channel) {
             record.at("configuration").size() != 2 || !record.at("configuration").at("qemu").is_object())
             throw std::runtime_error("Foreign or malformed immutable instance identity.");
         const auto& budget = record.at("configuration").at("resources");
+        if (!budget.at("cpus").is_number_unsigned() || !budget.at("memoryBytes").is_number_unsigned())
+            throw std::runtime_error("Registered resources must use unsigned integer tokens.");
         auto memory = budget.at("memoryBytes").get<uint64_t>(); auto cpus = budget.at("cpus").get<uint64_t>();
         if (budget.size() != 3 || !cpus || cpus > 64 || !memory || memory > INT64_MAX || memory % (1ULL << 30) ||
             !budget.at("preset").is_string()) throw std::runtime_error("Invalid registered resource configuration.");

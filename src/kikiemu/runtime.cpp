@@ -19,8 +19,10 @@
 namespace kiki {
 using json = nlohmann::json;
 json parse_json_document(const std::string& text) {
+    if (text.starts_with("\xef\xbb\xbf")) throw std::runtime_error("Product JSON must use UTF-8 without a BOM.");
     std::map<int, std::set<std::string>> keys;
     return json::parse(text, [&](int depth, json::parse_event_t event, json& parsed) {
+        if (depth > 64) throw std::runtime_error("Product JSON nesting exceeds its supported limit.");
         if (event == json::parse_event_t::object_start) keys[depth + 1].clear();
         if (event == json::parse_event_t::key && !keys[depth].insert(parsed.get<std::string>()).second)
             throw std::runtime_error("Duplicate JSON object key; operation refused.");
@@ -133,6 +135,22 @@ std::string sha256(const fs::path& file) {
     return result.str();
 }
 
+std::string sha256_text(const std::string& text) {
+    if (text.size() > ULONG_MAX) throw std::runtime_error("SHA-256 input exceeds the supported length.");
+    BCRYPT_ALG_HANDLE algorithm = nullptr; BCRYPT_HASH_HANDLE hash = nullptr;
+    struct Cleanup {
+        BCRYPT_ALG_HANDLE& algorithm; BCRYPT_HASH_HANDLE& hash;
+        ~Cleanup() { if (hash) BCryptDestroyHash(hash); if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0); }
+    } cleanup{algorithm, hash};
+    std::array<unsigned char, 32> digest;
+    if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0 ||
+        BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0) < 0 ||
+        BCryptHashData(hash, reinterpret_cast<PUCHAR>(const_cast<char*>(text.data())), static_cast<ULONG>(text.size()), 0) < 0 ||
+        BCryptFinishHash(hash, digest.data(), digest.size(), 0) < 0) throw std::runtime_error("SHA-256 operation failed.");
+    std::ostringstream result;
+    for (auto byte : digest) result << std::hex << std::setw(2) << std::setfill('0') << unsigned(byte);
+    return result.str();
+}
 static bool windows_dll(const std::string& name) {
     auto key = lower(name);
     if (key.starts_with("api-ms-win-") || key.starts_with("ext-ms-")) return true;

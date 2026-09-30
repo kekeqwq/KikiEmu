@@ -1,0 +1,48 @@
+{
+  "fixtureVersion": 1,
+  "purpose": "synthetic contract metadata only; never publish as a bootable system",
+  "validManifest": {
+    "kind": "org.kiki.kikiaosp.system", "formatVersion": 1,
+    "systemVersion": "0.1.0-alpha", "product": "kikiaosp_test", "channel": "release",
+    "architecture": "aarch64", "pageSizeBytes": 4096,
+    "runtimeAbi": "kiki-arm64-whpx-virgl-gpt-v1", "minimumLauncherVersion": "0.1.0-alpha",
+    "layoutVersion": "gpt-v1", "sectorSizeBytes": 512, "alignmentBytes": 1048576, "minimumDataBytes": 8589934592,
+    "payloads": [
+      {"role": "boot", "path": "payload/boot.img", "imageFormat": "android-boot-v4", "bytes": 12288, "partitionBytes": 1048576, "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+      {"role": "system", "path": "payload/system.img", "imageFormat": "raw-erofs", "bytes": 4096, "partitionBytes": 1048576, "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+      {"role": "vendor", "path": "payload/vendor.img", "imageFormat": "raw-erofs", "bytes": 4096, "partitionBytes": 1048576, "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+    ],
+    "sourceLock": {"path": "provenance/source-lock.json", "bytes": 1000, "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"},
+    "licenses": [
+      {"path": "licenses/aosp.txt", "bytes": 100, "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+      {"path": "licenses/kernel.txt", "bytes": 100, "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+    ],
+    "buildIdentity": {"displayVersion": "KikiAOSP 0.1 Alpha", "model": "KikiAOSP 0.1 Alpha", "fingerprint": "KikiAOSP/kikiaosp_test/kikiaosp_test:17/KIKI01/0001:userdebug/test-keys", "androidVersion": "17", "kernelVersion": "7.3.0-rc4-4k"},
+    "requiredFeatures": ["boot-v4-direct", "gpt-v1", "fresh-f2fs", "exact-total-storage", "sdl-native-pixels", "virgl", "guest-120hz", "instance-isolation-v1", "surface-camera-v1"]
+  },
+  "negativeMutations": [
+    {"name": "unknown-format", "pointer": "/formatVersion", "value": 2},
+    {"name": "decimal-format-token", "pointer": "/formatVersion", "value": 1.0},
+    {"name": "decimal-byte-token", "pointer": "/payloads/0/bytes", "value": 12288.0},
+    {"name": "development-channel", "pointer": "/channel", "value": "dev"},
+    {"name": "x86-target", "pointer": "/architecture", "value": "x86_64"},
+    {"name": "16k-target", "pointer": "/pageSizeBytes", "value": 16384},
+    {"name": "unsupported-abi", "pointer": "/runtimeAbi", "value": "legacy-vda-vdb"},
+    {"name": "wrong-role-path", "pointer": "/payloads/0/path", "value": "payload/vendor.img"},
+    {"name": "duplicate-role", "pointer": "/payloads/1/role", "value": "boot"},
+    {"name": "wrong-format", "pointer": "/payloads/0/imageFormat", "value": "raw-erofs"},
+    {"name": "traversal", "pointer": "/payloads/0/path", "value": "../boot.img"},
+    {"name": "unaligned-bytes", "pointer": "/payloads/0/bytes", "value": 12289},
+    {"name": "oversized-payload", "pointer": "/payloads/1/bytes", "value": 34359738368},
+    {"name": "incorrect-partition-rounding", "pointer": "/payloads/0/partitionBytes", "value": 2097152},
+    {"name": "invalid-sha", "pointer": "/payloads/0/sha256", "value": "00"},
+    {"name": "host-qemu-path", "pointer": "/qemu", "value": "C:\\tools\\qemu.exe"},
+    {"name": "arbitrary-command", "pointer": "/command", "value": "run this"},
+    {"name": "license-exe", "pointer": "/licenses/0/path", "value": "licenses/setup.exe"},
+    {"name": "duplicate-license", "pointer": "/licenses/1/path", "value": "licenses/aosp.txt"},
+    {"name": "missing-feature", "pointer": "/requiredFeatures", "value": ["virgl"]},
+    {"name": "unknown-feature", "pointer": "/requiredFeatures/0", "value": "arbitrary-host-plugin"},
+    {"name": "guest-dev-identity", "pointer": "/buildIdentity/model", "value": "KikiAOSP Dev"},
+    {"name": "requires-newer-launcher", "pointer": "/minimumLauncherVersion", "value": "0.2.0"}
+  ]
+}

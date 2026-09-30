@@ -122,14 +122,21 @@ static void check_image_header(const std::string& role, const fs::path& file) {
     }
 }
 json install_disk(const json& binding, const fs::path& newDirectory, uint64_t totalBytes,
-                  const std::map<std::string, fs::path>& payloads, uint64_t minimumDataBytes) {
+                  const std::map<std::string, fs::path>& payloads, uint64_t minimumDataBytes,
+                  const std::map<std::string, std::string>& manifestHashes) {
     verify_qemu_binding(binding);
     auto directory = normalize_directory(newDirectory.wstring());
     if (fs::exists(directory)) throw std::runtime_error("Installation destination already exists; no files were changed.");
     std::map<std::string, uint64_t> lengths;
+    std::map<std::string, std::string> validatedHashes;
+    if (!manifestHashes.empty() && manifestHashes.size() != payloads.size())
+        throw std::runtime_error("Manifest payload identity set differs from the installation inputs.");
     for (const auto& [role, file] : payloads) {
         check_image_header(role, file);
         lengths[role] = fs::file_size(file);
+        validatedHashes[role] = sha256(file);
+        if (!manifestHashes.empty() && (!manifestHashes.contains(role) || validatedHashes.at(role) != manifestHashes.at(role)))
+            throw std::runtime_error("Installation input differs from the verified manifest; no disk was created.");
     }
     auto layout = plan_disk(totalBytes, lengths, minimumDataBytes);
     auto bin = fs::path(utf16(binding.at("binDirectory").get<std::string>()));
@@ -177,7 +184,9 @@ json install_disk(const json& binding, const fs::path& newDirectory, uint64_t to
     for (const auto& partition : layout.partitions) {
         auto found = payloads.find(partition.name);
         if (found == payloads.end()) continue; // Fresh misc/data remain all zero.
-        auto expected = sha256(found->second);
+        auto expected = validatedHashes.at(partition.name);
+        if (sha256(found->second) != expected || fs::file_size(found->second) != lengths.at(partition.name))
+            throw std::runtime_error("Installation input changed before import; instance was not registered.");
         std::ifstream stream(found->second, std::ios::binary);
         uint64_t written = 0;
         while (written < lengths.at(partition.name)) {

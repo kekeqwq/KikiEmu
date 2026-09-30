@@ -10,6 +10,7 @@ struct PeInfo {
 };
 PeInfo inspect_pe(const fs::path& file);
 std::string sha256(const fs::path& file);
+std::string sha256_text(const std::string& text);
 // Product-owned JSON must not silently accept shadowed/duplicate object keys.
 // Callers bound the input length and validate the specific schema afterward.
 nlohmann::json parse_json_document(const std::string& text);
