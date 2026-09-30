@@ -14,5 +14,8 @@
 /LICENSING.md text eol=lf
 /src/** text eol=lf
 /tests/** text eol=lf
+/assets/*.png binary
+/assets/*.ico binary
+/assets/*.md text eol=lf
 /.gitignore text eol=lf
 /.gitattributes text eol=lf

@@ -5,6 +5,9 @@
 #include <windows.h>
 #include <shellapi.h>
 #include "../src/kikiemu/runtime.hpp"
+#include "../src/kikiemu/disk.hpp"
+#include "../src/kikiemu/boot.hpp"
+#include <algorithm>
 #include <iostream>
 #include <stdexcept>
 
@@ -63,6 +66,44 @@ int wmain() {
         check(length > 0 && inspect_pe(fs::path(executable)).machine == 0xaa64, "native ARM64 build");
         check(sha256(fs::path(executable)).size() == 64, "streaming SHA-256");
         rejects([] { inspect_qemu(normalize_directory(L"./this-qemu-bin-does-not-exist")); }, "missing runtime accepted");
+        std::map<std::string, uint64_t> payloads = {{"boot", 37130240}, {"system", 1109270528}, {"vendor", 101437440}};
+        auto layout = plan_disk(200ULL << 30, payloads, 8ULL << 30);
+        check(layout.totalBytes == 200ULL << 30 && layout.partitions.size() == 5, "total capacity and five GPT partitions");
+        check(layout.partitions.front().name == "boot" && layout.partitions.back().name == "userdata", "GPT boot/data discovery order");
+        check(layout.partitions.back().lengthBytes < layout.totalBytes, "data capacity excludes required system partitions");
+        uint64_t previousEnd = 1ULL << 20;
+        for (const auto& partition : layout.partitions) {
+            check(partition.offsetBytes == previousEnd && partition.offsetBytes % (1ULL << 20) == 0 &&
+                  partition.lengthBytes % (1ULL << 20) == 0, "aligned non-overlapping contiguous partitions");
+            previousEnd += partition.lengthBytes;
+        }
+        check(previousEnd + 33 * 512 <= layout.totalBytes, "backup GPT outside userdata");
+        auto second = plan_disk(32ULL << 30, payloads, 8ULL << 30);
+        check(second.uuid != layout.uuid && second.partitions[0].uuid != layout.partitions[0].uuid, "fresh independent disk/partition identities");
+        check(layout_json(second).at("totalBytes") == 32ULL << 30, "layout metadata capacity");
+        rejects([&] { plan_disk(1ULL << 30, payloads, 8ULL << 30); }, "too small system capacity accepted");
+        rejects([&] { plan_disk(4ULL << 30, payloads, 8ULL << 30); }, "too small userdata capacity accepted");
+        rejects([&] { auto bad = payloads; bad.erase("vendor"); plan_disk(32ULL << 30, bad, 8ULL << 30); }, "missing vendor accepted");
+        rejects([&] { auto bad = payloads; bad["system"] += 1; plan_disk(32ULL << 30, bad, 8ULL << 30); }, "unaligned image accepted");
+        rejects([&] { plan_disk((32ULL << 30) + 512, payloads, 8ULL << 30); }, "unaligned total accepted");
+        rejects([&] { plan_disk(1ULL << 63, payloads, 8ULL << 30); }, "signed-offset overflow accepted");
+        check(crc32(reinterpret_cast<const unsigned char*>("123456789"), 9) == 0xcbf43926U, "UEFI CRC32 known vector");
+        std::array<unsigned char, 4096> boot{};
+        auto put = [&](size_t at, uint32_t value) {
+            for (size_t i = 0; i < 4; ++i) boot[at + i] = static_cast<unsigned char>(value >> (8 * i));
+        };
+        std::copy_n(reinterpret_cast<const unsigned char*>("ANDROID!"), 8, boot.begin());
+        put(8, 64); put(12, 32); put(20, 1584); put(40, 4);
+        auto parsed = parse_boot_header(boot, 12288);
+        check(parsed.ramdiskOffset == 8192 && parsed.kernelBytes == 64 && parsed.ramdiskBytes == 32, "boot v4 extraction offsets");
+        rejects([&] { parse_boot_header(boot, 12289); }, "trailing boot data accepted");
+        rejects([&] { parse_boot_header(boot, 8192); }, "truncated ramdisk accepted");
+        boot[44] = 'a'; rejects([&] { parse_boot_header(boot, 12288); }, "hidden command line accepted"); boot[44] = 0;
+        put(1580, 4096); rejects([&] { parse_boot_header(boot, 16384); }, "unsupported boot signature accepted"); put(1580, 0);
+        put(40, 3); rejects([&] { parse_boot_header(boot, 12288); }, "wrong boot version accepted"); put(40, 4);
+        put(8, 0); rejects([&] { parse_boot_header(boot, 12288); }, "empty kernel accepted"); put(8, 64);
+        boot[24] = 1; rejects([&] { parse_boot_header(boot, 12288); }, "nonzero boot reserved fields accepted"); boot[24] = 0;
+        boot[4095] = 1; rejects([&] { parse_boot_header(boot, 12288); }, "nonzero header padding accepted");
         std::cout << "PASS: " << passed << " internal core checks. No installation, configuration or VM changes.\n";
         return 0;
     } catch (const std::exception& error) {

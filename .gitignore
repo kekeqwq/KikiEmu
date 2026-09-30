@@ -15,10 +15,15 @@
 !/src/**
 !/tests/
 !/tests/**
+!/assets/
+!/assets/kikiemu-icon.png
+!/assets/kikiemu.ico
+!/assets/README.md
 !/patches/
 /patches/*
 !/patches/qemu-kikiaosp-tested-surface-20260929.patch
 !/patches/qemu-sdl-boot-console.patch
+!/patches/qemu-io-binary-source.patch
 !/patches/qemu-windows-gtk-full-redraw.patch
 !/patches/qemu-windows-arm64-gtk-touch.patch
 !/patches/qemu-windows-gtk-glarea-wgl.patch
@@ -38,6 +43,8 @@
 /tools/*
 !/tools/build_qemu_arm64.sh
 !/tools/build_kikiemu_core.ps1
+!/tools/build_kikiemu_icon.ps1
+!/tools/check_gpt_guest_storage.ps1
 !/tools/export_qemu_runtime.ps1
 !/tools/build_surface_camera_bridge.ps1
 !/tools/run_kikiaosp_surface_camera.ps1

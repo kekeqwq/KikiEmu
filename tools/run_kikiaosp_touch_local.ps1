@@ -3,6 +3,10 @@ param(
   [string]$BundleDir = (Join-Path $PSScriptRoot '..\bundles\surface-main-20260930'),
   [string]$QemuPath = (Join-Path $PSScriptRoot 'qemu-boot-src\build\qemu-system-aarch64.exe'),
   [string]$QemuRomDirectory,
+  # Internal GPT system prototype only. Accepted multi-disk defaults stay intact.
+  [string]$PhoneDisk,
+  [string]$BootPartitionUuid,
+  [string]$RamdiskImage = 'kiki-kernel-ramdisk-rc4-clean-odm-adb.img',
   [string]$Msys2Bin = 'C:\msys64\clangarm64\bin',
   [string]$KernelImage = 'kernel-linux-7.3-rc4-4k-fencefix-20260927',
   [string]$SystemImage = 'system-kikiaosp-cp2a-theme-picker-20260930.img',
@@ -75,13 +79,19 @@ if ($GtkSwapInterval -ne 'default' -and $DisplayBackend -ne 'gtk') {
 if ($HwcMode -eq 'Guest' -and $GpuMode -ne 'Virgl') {
   throw '-HwcMode Guest requires -GpuMode Virgl'
 }
-if ($PersistentDisks -and
+if ($PhoneDisk -and $PersistentDisks) { throw 'GPT prototype owns one standalone disk; do not combine it with legacy writable overlays.' }
+if ($BootPartitionUuid -and -not $PhoneDisk) { throw 'BootPartitionUuid requires PhoneDisk.' }
+if ($PhoneDisk -and ($BootPartitionUuid -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -or
+    $RamdiskImage -eq 'kiki-kernel-ramdisk-rc4-clean-odm-adb.img')) {
+  throw 'GPT prototype requires its matching tracked GPT ramdisk and boot-partition UUID, never the legacy baseline ramdisk.'
+}
+if (-not $PhoneDisk -and $PersistentDisks -and
     ($UserdataImage -eq 'userdata-kikiaosp17-f2fs.img' -or $MiscImage -eq 'misc.img' -or
      -not $UserdataImage.EndsWith('.qcow2', [StringComparison]::OrdinalIgnoreCase) -or
      -not $MiscImage.EndsWith('.qcow2', [StringComparison]::OrdinalIgnoreCase))) {
   throw '-PersistentDisks requires explicit separate qcow2 overlay images for userdata and misc; baseline raw disks must remain untouched.'
 }
-if (-not $PersistentDisks -and
+if (-not $PhoneDisk -and -not $PersistentDisks -and
     ($UserdataImage -ne 'userdata-kikiaosp17-f2fs.img' -or $MiscImage -ne 'misc.img')) {
   throw 'Custom writable disks require -PersistentDisks, so the QEMU snapshot mode cannot silently discard their writes.'
 }
@@ -147,6 +157,25 @@ $kernel = if ([IO.Path]::IsPathRooted($KernelImage)) {
   Join-Path $images $KernelImage
 }
 if (-not (Test-Path -LiteralPath $kernel)) { throw "Missing kernel image $kernel" }
+$ramdisk = if ([IO.Path]::IsPathRooted($RamdiskImage)) { $RamdiskImage } else { Join-Path $images $RamdiskImage }
+if (-not (Test-Path -LiteralPath $ramdisk -PathType Leaf)) { throw "Missing ramdisk image $ramdisk" }
+if ($PhoneDisk) {
+  $PhoneDisk = (Resolve-Path -LiteralPath $PhoneDisk).Path
+  if ($PhoneDisk.Contains(',') -or [IO.Path]::GetExtension($PhoneDisk) -ne '.qcow2') { throw 'GPT prototype disk must be an explicit standalone qcow2 path without QEMU option separators.' }
+  $layoutPath = Join-Path (Split-Path $PhoneDisk -Parent) 'disk-layout.json'
+  $layout = Get-Content -LiteralPath $layoutPath -Raw | ConvertFrom-Json
+  $bootPartition = @($layout.partitions | Where-Object name -eq 'boot')
+  if ($layout.layoutVersion -ne 'gpt-v1' -or $bootPartition.Count -ne 1 -or $bootPartition[0].uuid -cne $BootPartitionUuid) {
+    throw 'GPT layout record and selected boot UUID do not match.'
+  }
+  $imageTool = Join-Path (Split-Path $qemu -Parent) 'qemu-img.exe'
+  $diskInfoText = & $imageTool info --output=json $PhoneDisk
+  if ($LASTEXITCODE -ne 0) { throw 'Could not verify the offline GPT disk.' }
+  $diskInfo = ($diskInfoText -join "`n") | ConvertFrom-Json
+  if ($diskInfo.format -ne 'qcow2' -or $diskInfo.'virtual-size' -ne $layout.totalBytes -or $diskInfo.'backing-filename') {
+    throw 'GPT disk capacity/format/backing identity changed.'
+  }
+}
 $serial = Join-Path $images "qemu-kikiaosp-$Tag.log"
 $logcat = Join-Path $images "qemu-kikiaosp-$Tag.logcat"
 $cameraBridgeLog = Join-Path $images "qemu-kikiaosp-$Tag.camera-bridge.log"
@@ -183,6 +212,7 @@ if ($SurfaceCameras -and -not $DryRun -and
 
 $eglDriver = if ($GpuMode -eq 'Virgl') { 'mesa' } else { 'angle' }
 $append = "earlycon=pl011,0x09000000 console=ttyAMA0 loglevel=$KernelLogLevel printk.devkmsg=on audit=0 androidboot.hardware=ranchu androidboot.hardwareegl=$eglDriver androidboot.hardware.egl=$eglDriver androidboot.hardware.gralloc=minigbm androidboot.hardware.hwcomposer=ranchu androidboot.hardware.vulkan=pastel androidboot.hardware.hwcomposer.mode=$($HwcMode.ToLowerInvariant()) androidboot.hardware.hwcomposer.display_finder_mode=drm androidboot.hardware.guest_hwui_renderer=gles androidboot.debug.renderengine.backend=$RenderEngineBackend androidboot.selinux=permissive enforcing=0 androidboot.force_normal_boot=1 androidboot.verifiedbootstate=orange androidboot.init_fatal_reboot_target=none androidboot.adb.secure=0 binder.devices=binder,hwbinder,vndbinder"
+if ($PhoneDisk) { $append += " androidboot.boot_part_uuid=$BootPartitionUuid" }
 if ($SpeakerOutput) {
   $AudioStubOutput = $false
 }
@@ -194,7 +224,7 @@ if ($QemuRomDirectory) {
   $arguments.Add('-L')
   $arguments.Add($QemuRomDirectory)
 }
-foreach ($item in @('-M','virt','-accel','whpx','-cpu','host','-m','4096','-smp',[string]$VcpuCount,'-parallel','none','-kernel',$kernel,'-initrd',(Join-Path $images 'kiki-kernel-ramdisk-rc4-clean-odm-adb.img'),'-append',$append)) {
+foreach ($item in @('-M','virt','-accel','whpx','-cpu','host','-m','4096','-smp',[string]$VcpuCount,'-parallel','none','-kernel',$kernel,'-initrd',$ramdisk,'-append',$append)) {
   $arguments.Add($item)
 }
 $partitions = @(
@@ -206,6 +236,9 @@ $partitions = @(
   @('misc',$MiscImage,$false),
   @('odm','odm-kikiaosp17-empty.img',$true)
 )
+if ($PhoneDisk) {
+  foreach ($item in @('-drive', "if=none,file=$PhoneDisk,format=qcow2,id=kiki-phone,discard=unmap,detect-zeroes=unmap", '-device', 'virtio-blk-pci,drive=kiki-phone')) { $arguments.Add($item) }
+} else {
 foreach ($partition in $partitions) {
   $path = if ([IO.Path]::IsPathRooted($partition[1])) {
     $partition[1]
@@ -220,6 +253,7 @@ foreach ($partition in $partitions) {
   $arguments.Add($drive)
   $arguments.Add('-device')
   $arguments.Add("virtio-blk-pci,drive=$($partition[0])")
+}
 }
 $logcatQemuPath = $logcat.Replace('\','/')
 $gpuResolution = if ($NativeResolution) { "xres=$PortraitWidthPixels,yres=$PortraitHeightPixels" } else { 'xres=1080,yres=2400' }
@@ -246,7 +280,7 @@ foreach ($item in @(
 )) {
   $arguments.Add($item)
 }
-if (-not $PersistentDisks) { $arguments.Add('-snapshot') }
+if (-not $PersistentDisks -and -not $PhoneDisk) { $arguments.Add('-snapshot') }
 if ($TraceVirglFences -or $SdlKeyboardTrace) {
   $traceOptions = [System.Collections.Generic.List[string]]::new()
   if ($TraceVirglFences) {

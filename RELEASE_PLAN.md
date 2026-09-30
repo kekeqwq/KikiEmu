@@ -1,6 +1,6 @@
 # KikiEmu / KikiAOSP 0.1 Alpha release plan
 
-Status: implementation branch, 2026-09-30. No accepted release build, disk installer, setup.exe, format-1 ZIP, tag or GitHub Release yet. The accepted mainline remains the development rollback baseline.
+Status: implementation branch, 2026-09-30. Native internal disk-install/boot-cache modules and an icon master exist; no accepted release build, public manager/installer, setup.exe, format-1 ZIP, tag or GitHub Release yet. The accepted mainline remains the development rollback baseline.
 
 ## Agreed requirements
 
@@ -30,6 +30,8 @@ Proposal: standalone phone.qcow2, GPT-v1, 512-byte sectors/1MiB alignment, no pr
 All partitions/GPT/reserves count against the total. A small verified direct-boot cache is derived locally from the installed boot payload for QEMU kernel/ramdisk loading, never from Downloads; count cache/logs in host actual usage, not Android free space. Final GPT/direct-boot behavior still requires proof.
 
 The current fstab mounts entire vda/vdb/vde devices. A single GPT phone disk changes the boot/storage ABI: named partitions, first-stage discovery, fresh formatting and initramfs generation must change together in the DEVICE repository, not just in Windows arguments. Do not change the accepted development baseline in place. A tracked source-built static-init ramdisk prototype now boots this existing multi-disk ABI with VirGL/120Hz and has repeated identical output hashes; it is not a clean final ZIP or proof of GPT/fresh-userdata installation.
+
+Implementation checkpoint: the native internal prototype creates a new standalone 32-GiB QCOW2 with five aligned GPT partitions, independent UUIDs and no backing/preallocation; all GPT/payload writes are read back and QCOW2 is checked. Boot cache is derived from the installed boot partition, with strict v4/ARM64/4-KiB/gzip checks and no manifest-supplied command line. The first GPT boot identified an upstream init gap: `boot_part_uuid` recognizes MMC/NVME/SCSI but not virtio-blk, yielding an empty boot-device identity and no by-name system node. The device repository owns the minimal UUID-aware virtio transport fix and both-init-stage build recipe. The corrected system boots to SDL/VirGL/120Hz HOME, formats fresh F2FS and retains a data marker across normal shutdown/reboot. User-visible storage acceptance is still blocked by AOSP phone-tier capacity rounding (32GiB falsely displayed as64GB, with ~31GB attributed to Android). A product-gated exact whole-block-disk fix is tracked in the device repository and awaiting candidate validation. No fixed system-usage number or renamed capacity label is acceptable. Final clean-source packaging remains required. These internal tools do not constitute user CLI/installer acceptance.
 
 Create validates/stages/installs/checks atomically before registering a UUID/display ID. First-boot data initialization must mount the real correctly-sized filesystem before showing startup success; interruption recovery must never format an established user disk. Normal public boot persists writes, never the current developer temporary `-snapshot`. Validate immutable actual capacity/layout at startup and refuse external drift; no set/resize/repartition/reformat/system replacement in0.1.
 

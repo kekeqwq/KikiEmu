@@ -59,7 +59,7 @@ pacman -S --needed git make ninja python pkgconf \
 ./tools/build_qemu_arm64.sh
 ```
 
-脚本固定 QEMU 上游 `bde658eef6b38c45794bfd7ad4d2dd1b574e4694`，依次应用 [完整稳定补丁](patches/qemu-kikiaosp-tested-surface-20260929.patch) 和 [原生启动控制台补丁](patches/qemu-sdl-boot-console.patch)，显式启用 WHPX、SDL、OpenGL、VirGL，并保留 GTK 对照后端。补丁涵盖 Windows WGL、DPI 原生像素、WM_POINTER 触摸、外设键盘、禁止鼠标 Grab、120 Hz、SDL 音频和同窗口启动画面。默认构建目录为 `tools/qemu-boot-src`，并行度8，可用 `KIKI_BUILD_JOBS` 调整。已有脏源码会拒绝覆盖，可传入另一个新源码目录；已打补丁的源码后续直接 `ninja -C tools/qemu-boot-src/build -j8 qemu-system-aarch64.exe` 增量构建。不要把诊断补丁叠加到默认 EXE。
+脚本固定 QEMU 上游 `bde658eef6b38c45794bfd7ad4d2dd1b574e4694`，依次应用 [完整稳定补丁](patches/qemu-kikiaosp-tested-surface-20260929.patch)、[磁盘工具二进制读取补丁](patches/qemu-io-binary-source.patch) 和 [原生启动控制台补丁](patches/qemu-sdl-boot-console.patch)，显式启用 WHPX、SDL、OpenGL、VirGL，并保留 GTK 对照后端。补丁涵盖 Windows WGL、DPI 原生像素、WM_POINTER 触摸、外设键盘、禁止鼠标 Grab、120 Hz、SDL 音频和同窗口启动画面；新增 qemu-io 补丁仅保证 Windows 上从文件写入的磁盘字节不经过文本转换。默认构建目录为 `tools/qemu-boot-src`，并行度8，可用 `KIKI_BUILD_JOBS` 调整。已有脏源码会拒绝覆盖，可传入另一个新源码目录；已打补丁的源码后续直接 `ninja -C tools/qemu-boot-src/build -j8 qemu-system-aarch64.exe qemu-img.exe qemu-io.exe` 增量构建。不要把诊断补丁叠加到默认 EXE。
 
 默认 EXE 为 `tools/qemu-boot-src/build/qemu-system-aarch64.exe`；已测试版本 SHA-256 为 `3004741332643cfd775f83ad990714716ca9975ae341f0355fda7fded4c4a651`。遮罩前的5b92版本留在旧构建目录，只有显式回溯 profile 才使用，不会自动回退到旧文件。重建的二进制可以哈希不同，但须保留能力并回归测试。运行不能只复制 EXE，还需要 ROM、运行库和宿主 OpenGL 驱动。Surface 已验证的宿主驱动为 Mesa D3D12 → Qualcomm Adreno；MSYS2 virglrenderer 是渲染协议库，不自动安装该宿主驱动。启动器把 `C:\msys64\clangarm64\bin` 放入进程 DLL 搜索路径。
 
@@ -102,11 +102,23 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH  # 仅当前开发终端，�
 
 导出器只接受新目录，收集本次构建的 ARM64 EXE、静态导入的 DLL 依赖链和 ROM，记录哈希，并检查导出结果不再依赖 MSYS2 DLL 目录。`DependencyBin` 只是**构建导出输入**，不是用户启动时的 fallback。目录检查不启动虚拟机，也不安装程序、改注册表或修改用户实例。
 
-当前检查工具是开发阶段产物，不是发布版 CLI；静态补丁标记/PE/DLL 检查不能代替 GPT 启动 ABI、动态加载模块、宿主 OpenGL/Mesa D3D12 → Adreno 和完整系统实测。现有两组稳定 QEMU 补丁及其构建命令已可复现开发基线；正式版标题/隔离能力与新磁盘 ABI 仍在实现，完成后会同步更新构建补丁，不能把这次导出直接称作已验收发布版。
+当前检查工具是开发阶段产物，不是发布版 CLI；静态补丁标记/PE/DLL 检查不能代替 GPT 启动 ABI、动态加载模块、宿主 OpenGL/Mesa D3D12 → Adreno 和完整系统实测。完整稳定补丁、启动控制台补丁与磁盘工具补丁均已追踪；正式版标题/隔离能力与新磁盘 ABI 仍在实现，完成后会同步更新构建补丁，不能把这次导出直接称作已验收发布版。
 
 发行启动将只使用实例保存的规范化 QEMU 路径及已验证文件身份；缺失、不兼容或文件变化时给出英文错误，不搜索 PATH、不回退到旧开发 EXE、不自动换成软件渲染。正式和 Dev 使用独立 bin/output 目录。KikiEmu 卸载不删除用户提供的 QEMU 或用户磁盘。
 
 安装器、CLI 初始化、PATH/快捷方式和卸载的用户视角验收由用户执行；本轮开发不运行 setup.exe 或修改用户 PATH。构建检查与系统本身的启动/图形/持久化回归由开发侧负责，待候选准备好后交付用户。
+
+### 内部单盘系统原型（不是用户验收入口）
+
+`src/kikiemu` 已包含原生 ARM64 参数/运行目录检查、受限子进程、GPT 规划、按需增长 QCOW2 安装及 boot-v4 缓存提取模块。内部库测试65项通过。`kikiemu-disk-prototype.exe` 只供开发者测试**系统磁盘**，不写管理器注册表、不安装 setup.exe、不启动虚拟机；它不是已交付的 `kikiemu create`。
+
+32 GiB 原型磁盘启动前约占1.16 GiB；GPT、boot/system/vendor 逐块读回校验及 QCOW2 检查通过，没有 backing file 或旧 userdata。首次系统启动发现上游 init 的 boot UUID 分类漏掉 virtio-blk，已在设备仓库追踪最小修补并重建。修正后单盘实际启动进入 SDL/VirGL/120Hz 桌面，剩余容量首次格式化为 F2FS，跨正常关机/重启的数据标记保持不变。但 Settings 的上游手机档位取整把32 GiB误报成64 GB、进而误算系统占用约31 GB；KikiAOSP专用真实块盘容量补丁已追踪，候选正在构建，UI容量验收尚未通过。不能把底层容量正确当作用户可见存储页面正确，也不能把开发原型当作干净发行包。
+
+`tools/check_gpt_guest_storage.ps1` 是只读系统检查工具：必须显式指定 QEMU PID/EXE/实例路径，核对进程创建身份与 ADB端点所有权后，比较GPT记录、内核完整盘容量、vold及StorageStats两个接口、F2FS容量；不修改用户数据，不调用用户CLI初始化。真实Settings页面与持久化仍需分别观察。
+
+低层开发入口新增 `PhoneDisk` / `BootPartitionUuid` / `RamdiskImage`，显式 GPT 模式只接入该独立磁盘、禁止 legacy overlay 混用且不加 `-snapshot`；不传这些参数时原多盘回溯基线不变。该入口仍使用开发测试端点，不是尚待实现的正式/Dev 隔离管理器。
+
+启动器图标主图及七尺寸 Windows ICO 已保存到 [assets](assets/README.md)，由内置 image_gen 按原创女孩抱机器人 brief 生成，完整 prompt 与转换步骤一并存档；安装器资源接入尚未完成。
 
 ## 3. 收集、校验并打包（现有开发基线）
 

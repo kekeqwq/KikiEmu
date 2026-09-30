@@ -51,6 +51,8 @@ fi
 git -C "$source_dir" checkout --detach "$qemu_rev"
 git -C "$source_dir" apply --check "$repo_root/patches/qemu-kikiaosp-tested-surface-20260929.patch"
 git -C "$source_dir" apply "$repo_root/patches/qemu-kikiaosp-tested-surface-20260929.patch"
+git -C "$source_dir" apply --check "$repo_root/patches/qemu-io-binary-source.patch"
+git -C "$source_dir" apply "$repo_root/patches/qemu-io-binary-source.patch"
 if [[ ${KIKI_BOOT_CONSOLE:-1} == 1 ]]; then
     git -C "$source_dir" apply --check "$repo_root/patches/qemu-sdl-boot-console.patch"
     git -C "$source_dir" apply "$repo_root/patches/qemu-sdl-boot-console.patch"
