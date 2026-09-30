@@ -31,9 +31,9 @@ if (-not [System.IO.Path]::IsPathRooted($OutputPath)) {
 $outputDirectory = Split-Path -Parent $OutputPath
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 
-& $compiler -std=c++20 -O2 -Wall -Wextra -Wno-unused-parameter `
+& $compiler -std=c++20 -O2 -Wall -Wextra -Wno-unused-parameter -static `
     $sourcePath $winrtSourcePath -o $OutputPath `
-    -lole32 -lmfplat -lmfreadwrite -lmf -lmfuuid -lws2_32 -luuid -lwindowsapp
+    -lole32 -lmfplat -lmfreadwrite -lmf -lmfuuid -lws2_32 -luuid -lwindowsapp -lonecore
 if ($LASTEXITCODE -ne 0) {
     throw "Surface camera bridge build failed with exit code $LASTEXITCODE."
 }

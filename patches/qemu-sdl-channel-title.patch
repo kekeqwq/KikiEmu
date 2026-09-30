@@ -1,0 +1,18 @@
+diff --git a/ui/sdl2.c b/ui/sdl2.c
+--- a/ui/sdl2.c
++++ b/ui/sdl2.c
+@@ -644,6 +644,14 @@ static void sdl_update_caption(struct sdl2_console *scon)
+     char icon_title[1024];
+     const char *status = "";
+ 
++    const char *kiki_title = g_getenv("KIKI_SDL_WINDOW_TITLE");
++    if (kiki_title && kiki_title[0]) {
++        if (scon->real_window) {
++            SDL_SetWindowTitle(scon->real_window, kiki_title);
++        }
++        return;
++    }
++
+     if (!runstate_is_running()) {
+         status = " [Stopped]";
+     } else if (gui_grab && !sdl2_disable_mouse_grab) {

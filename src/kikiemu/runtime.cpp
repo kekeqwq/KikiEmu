@@ -164,7 +164,7 @@ static std::vector<std::string> capabilities(const fs::path& executable) {
     const std::vector<std::string> required = {
         "KIKI_SDL_DISABLE_GRAB", "KIKI_SDL_DISABLE_IME", "KIKI_SDL_NATIVE_PIXELS",
         "KIKI_SDL_START_WIDTH", "KIKI_SDL_START_HEIGHT", "KIKI_SDL_GUEST_REFRESH_RATE_HZ",
-        "KIKI_SDL_RAW_KEYBOARD_TRACE", "KIKI_SDL_BOOT_STATUS"
+        "KIKI_SDL_RAW_KEYBOARD_TRACE", "KIKI_SDL_BOOT_STATUS", "KIKI_SDL_WINDOW_TITLE"
     };
     auto bytes = read_pe_bytes(executable);
     std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());

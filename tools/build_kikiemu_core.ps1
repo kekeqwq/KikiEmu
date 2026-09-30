@@ -40,7 +40,7 @@ $header += 'inline constexpr const char* manifestSha256 = "' + $pin.files.'forma
 $header += 'inline constexpr const char* sourceLockSha256 = "' + $pin.files.'format-1/source-lock.schema.json' + '";' + "`n"
 $header += 'inline constexpr const char* producerRevision = "' + $pin.revision + '";' + "`n}`n"
 [IO.File]::WriteAllText((Join-Path $OutputDirectory 'package_contract.generated.hpp'), $header, [Text.UTF8Encoding]::new($false))
-$core = @('config', 'runtime', 'process', 'boot', 'disk', 'storage', 'lifecycle', 'registry', 'schema', 'package', 'manager') | ForEach-Object { Join-Path $repoRoot "src/kikiemu/$_.cpp" }
+$core = @('config', 'runtime', 'process', 'child', 'transport', 'boot', 'disk', 'storage', 'lifecycle', 'registry', 'schema', 'package', 'manager', 'session') | ForEach-Object { Join-Path $repoRoot "src/kikiemu/$_.cpp" }
 $flags = @('-std=c++20', '-O2', '-Wall', '-Wextra', '-static', '-municode', '-I', $OutputDirectory)
 $libs = @('-larchive', '-l:libz.dll.a', '-lbz2', '-llzma', '-lb2', '-llz4', '-lzstd', '-lcrypto', '-liconv', '-lcharset', '-lexpat', '-lpcre2-posix', '-lpcre2-8', '-lcrypt32', '-lbcrypt', '-lole32', '-lshell32', '-luuid', '-liphlpapi', '-lws2_32')
 # Compile the shared core once, then reuse it for every entry point.
@@ -51,9 +51,18 @@ foreach ($source in $core) {
     if ($LASTEXITCODE -ne 0) { throw "Native shared-core build failed: $source" }
     $objects += $object
 }
+$resources = Join-Path $OutputDirectory 'app-resource.o'
+Push-Location $repoRoot
+try {
+    & (Join-Path $prefix 'bin/windres.exe') -I $repoRoot -i src/kikiemu/app.rc -o $resources
+    if ($LASTEXITCODE -ne 0) { throw 'Native application icon/manifest resource build failed.' }
+} finally { Pop-Location }
 $cli = Join-Path $OutputDirectory 'kikiemu.exe'
-& $compiler @flags @objects (Join-Path $repoRoot 'src/kikiemu/cli.cpp') -o $cli @libs
+& $compiler @flags @objects $resources (Join-Path $repoRoot 'src/kikiemu/cli.cpp') -o $cli @libs
 if ($LASTEXITCODE -ne 0) { throw 'Native manager-CLI build failed.' }
+$desktop = Join-Path $OutputDirectory 'kikiemu-desktop.exe'
+& $compiler @flags -mwindows @objects $resources (Join-Path $repoRoot 'src/kikiemu/desktop.cpp') -o $desktop @libs
+if ($LASTEXITCODE -ne 0) { throw 'Native desktop-supervisor build failed.' }
 $inspector = Join-Path $OutputDirectory 'kikiemu-runtime-inspect.exe'
 & $compiler @flags @objects (Join-Path $repoRoot 'src/kikiemu/runtime_inspect.cpp') -o $inspector @libs
 if ($LASTEXITCODE -ne 0) { throw 'Native runtime-inspector build failed.' }

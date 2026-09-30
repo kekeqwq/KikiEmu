@@ -115,11 +115,15 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH  # 仅当前开发终端，�
 
 `src/kikiemu` 已包含原生 ARM64 参数/运行目录检查、受限子进程、GPT/动态 QCOW2 安装、boot-v4 缓存、安全 storage 删除、精确进程/端点核验、原子实例记录和失败恢复事务。发布分支新增共用 schema/语义检查、受限 ZIP 读取器及管理器分发：create 安装模块，list、set、info、doctor 和 `--delete --force --id` 已接入；缺少显式删除意图时底层接口同样拒绝。只设置内存/CPU 保留其他已设资源值，QEMU 路径检查失败不提交部分配置。
 
-内部检查只使用新建 TEMP fixtures 和自建测试子进程，不运行公开 CLI 的用户验收、不安装 setup.exe、不改用户 PATH 或真实 Android 数据。管理器组件可编译，但桌面/runtime supervisor、完整中断创建恢复、干净发行包、setup.exe 和正式/Dev 并行系统验收仍未完成，不能把该开发组件当作已交付产品。`kikiemu-disk-prototype.exe` 仍是只供开发者测试**系统磁盘**的入口。
+内部检查只使用新建 TEMP fixtures 和自建测试子进程，不运行公开 CLI 的用户验收、不安装 setup.exe、不改用户 PATH 或真实 Android 数据。控制台管理器和无终端桌面 supervisor 已可编译为 ARM64，并接入 start/stop/logs；运行管理的真实系统回归、完整中断创建恢复、干净发行包、setup.exe 和正式/Dev 并行系统验收仍未完成，不能把开发组件当作已交付产品。`kikiemu-disk-prototype.exe` 仍是只供开发者测试**系统磁盘**的入口。
+
+运行管理源码为每次启动建立独立会话 UUID、ADB/QMP/相机回环端口和日志目录；进程先暂停创建、登记精确身份后才执行。正式窗口标题为 `KikiEmu`，开发计划为 `QEMU/Dev`，控制和删除不依赖标题。私有 ADB wire 直接连登记的客机，不使用全局 5037 服务、默认设备或宿主 ADB key；单次命令接口为 `kikiemu adb --id 01 --shell "getprop ro.serialno"`，暂不提供交互式 shell。原生启动配方沿用 SDL/VirGL/120 Hz、8 CPU/4 GiB、1003×1556、不 Grab 的基线，不对宿主显示/键盘/音频设定作修改。
+
+强制删除已额外验证运行中的 supervisor 持有真实 storage lease 的情况：只读核验和锁定原目录身份，停止该实例后才升级删除权限；替换路径或未释放锁仍拒绝。241 项内部检查包括进程/端口隔离、私有 shell-v2 的分段数据/校验/超时/错误身份和持锁实例删除；公开安装器/CLI 的最终用户验收仍由用户执行。
 
 共用合同从设备仓库 commit `5cfd0a94c1b267661d2ae96bdc3875365ad686cf` 固定引入，见 [PIN.json](src/kikiemu/contracts/PIN.json)；构建时核对三个 JSON 文件的 SHA-256，再嵌入本机程序。ZIP/ZIP64 只允许规定文件、store/deflate、普通文件及一致的 local/central 名称；拒绝 SFX、重复/截断/NUL/路径跳转、隐藏附加文件、未知角色、开发身份或错误 ABI。长度、哈希、AOSP XML 精确项目提交、4K ARM64 boot/gzip 和 raw EROFS 再作语义核验，禁止执行包内代码。这里的测试 ZIP 是明确标记的非可启动假数据，绝不是用户需要的系统包。
 
-原生组件构建依赖 MSYS2 CLANGARM64 的 clang、nlohmann-json、libarchive、expat 及其依赖；运行 `tools/build_kikiemu_core.ps1 -RunUnitTests`。共享核心编译一次供四个入口复用。libarchive/expat 静态链接；MSYS2 的 libarchive 仍导入 zlib，构建脚本将原生 `zlib1.dll` 私有复制在 EXE 旁，不依赖用户 MSYS2/PATH。最终发行必须补齐静态/动态依赖的原许可和源码义务审计。
+原生组件构建依赖 MSYS2 CLANGARM64 的 clang、windres、nlohmann-json、libarchive、expat 及其依赖；运行 `tools/build_kikiemu_core.ps1 -RunUnitTests`。共享核心编译一次供两个产品入口和三个内部工具复用；产品入口嵌入原图标、版本、非提权和 DPI/长路径 manifest。libarchive/expat 静态链接；MSYS2 的 libarchive 仍导入 zlib，构建脚本将原生 `zlib1.dll` 私有复制在 EXE 旁，不依赖用户 MSYS2/PATH。相机桥接单独由 `tools/build_surface_camera_bridge.ps1` 构建，使用 Windows 官方 OneCore 导入库和静态 C++ runtime；只在实际打开相机时持有跨实例占用锁，关闭相机后释放。最终发行必须补齐静态/动态依赖的原许可和源码义务审计。
 
 32 GiB 原型磁盘启动前约占1.16 GiB；GPT、boot/system/vendor 逐块读回校验及 QCOW2 检查通过，没有 backing file 或旧 userdata。首次系统启动发现上游 init 的 boot UUID 分类漏掉 virtio-blk，已在设备仓库追踪最小修补并重建。修正后单盘实际启动进入 SDL/VirGL/120Hz 桌面，剩余容量首次格式化为 F2FS，跨正常关机/重启的数据标记保持不变。
 

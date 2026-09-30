@@ -6,6 +6,7 @@
 #include "manager.hpp"
 #include "package.hpp"
 #include "disk.hpp"
+#include "session.hpp"
 #include <iomanip>
 #include <optional>
 #include <sstream>
@@ -99,6 +100,10 @@ const char* management_help() {
            "  kikiemu set --id ID [--mem 8g] [--cpus 8] [--performance default|medium|high] [--qemu QEMU_BIN]\n"
            "  kikiemu info --id ID\n"
            "  kikiemu doctor --qemu QEMU_BIN\n"
+           "  kikiemu start [--id ID]\n"
+           "  kikiemu stop --id ID\n"
+           "  kikiemu logs --id ID\n"
+           "  kikiemu adb --id ID --shell COMMAND\n"
            "  kikiemu delete --force --id ID\n"
            "Commands also accept --create, --list, --set and --delete spellings.\n"
            "Size is immutable TOTAL GiB; disks allocate host space as used.\n"
@@ -112,6 +117,10 @@ std::string execute_management(const Command& command, const ManagerPaths& paths
         return inspect_qemu(normalize_directory(command.options.at("qemu"))).dump(2) +
             "\nRuntime files verified. Actual WHPX/GPU/display compatibility still requires a system boot.\n";
     }
+    if (command.name == "start") return start_instance(paths, command.options.contains("id") ? value(command, "id") : "");
+    if (command.name == "stop") return stop_instance(paths, value(command, "id"));
+    if (command.name == "logs") return instance_logs(paths, value(command, "id"));
+    if (command.name == "adb") return instance_shell(paths, value(command, "id"), value(command, "shell"));
     RegistryTransaction registry(paths.registryRoot, paths.channel);
     if (command.name == "create") return create_instance(command, paths, registry);
     if (command.name == "list") {

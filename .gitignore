@@ -23,6 +23,7 @@
 /patches/*
 !/patches/qemu-kikiaosp-tested-surface-20260929.patch
 !/patches/qemu-sdl-boot-console.patch
+!/patches/qemu-sdl-channel-title.patch
 !/patches/qemu-io-binary-source.patch
 !/patches/qemu-windows-gtk-full-redraw.patch
 !/patches/qemu-windows-arm64-gtk-touch.patch

@@ -88,6 +88,23 @@ void check(HRESULT hr, std::string_view where) {
     if (FAILED(hr)) throw std::runtime_error(std::string(where) + " failed: " + hrText(hr));
 }
 
+class CameraLease {
+public:
+    CameraLease() {
+        mutex_ = CreateMutexW(nullptr, FALSE, L"Local\\KikiEmu.SurfaceCameraLease.v1");
+        if (!mutex_) throw std::runtime_error("Could not create the Surface camera ownership lock");
+        auto state = WaitForSingleObject(mutex_, 0);
+        if (state != WAIT_OBJECT_0 && state != WAIT_ABANDONED) {
+            CloseHandle(mutex_); mutex_ = nullptr;
+            throw std::runtime_error("Surface cameras are in use by another KikiEmu/Dev instance; close its camera first");
+        }
+    }
+    ~CameraLease() { if (mutex_) { ReleaseMutex(mutex_); CloseHandle(mutex_); } }
+    CameraLease(const CameraLease&) = delete;
+private:
+    HANDLE mutex_ = nullptr;
+};
+
 struct CameraDevice {
     ~CameraDevice() {
         release();
@@ -105,10 +122,13 @@ struct CameraDevice {
         }
         source.reset();
         activation.reset();
+        // Release the shared camera lease only AFTER Windows capture sources.
+        lease.reset();
         released = true;
         return result;
     }
     ComPtr<IMFActivate> activation;
+    std::unique_ptr<CameraLease> lease;
     std::unique_ptr<SurfaceWinrtCamera> winrtCamera;
     ComPtr<IMFMediaSource> source;
     ComPtr<IMFSourceReader> reader;
@@ -165,9 +185,11 @@ std::unique_ptr<CameraDevice> openCamera(std::string_view facing,
     const std::string expected = facing == "front" ? "Surface Camera Front" :
                                  facing == "rear" ? "Surface Camera Rear" : "";
     if (expected.empty()) throw std::runtime_error("camera must be front or rear");
+    auto lease = std::make_unique<CameraLease>();
 
     if (facing == "front") {
         auto camera = std::make_unique<CameraDevice>();
+        camera->lease = std::move(lease);
         camera->winrtCamera = std::make_unique<SurfaceWinrtCamera>(facing, width, height);
         camera->width = camera->winrtCamera->width();
         camera->height = camera->winrtCamera->height();
@@ -185,6 +207,7 @@ std::unique_ptr<CameraDevice> openCamera(std::string_view facing,
     if (found == devices.end()) throw std::runtime_error(expected + " was not enumerated by Windows");
 
     auto camera = std::make_unique<CameraDevice>();
+    camera->lease = std::move(lease);
     camera->activation = std::move(found->second);
     std::cerr << "openCamera(" << facing << "): activating source\n";
     check(camera->activation->ActivateObject(IID_PPV_ARGS(camera->source.put())),

@@ -109,6 +109,17 @@ static void write_bytes(const fs::path& path, const std::vector<unsigned char>& 
     std::ofstream stream(path, std::ios::binary | std::ios::trunc);
     if (!stream.write(reinterpret_cast<const char*>(bytes.data()), bytes.size())) throw std::runtime_error("Could not write the installation chunk.");
 }
+static std::vector<unsigned char> primary_table(const DiskLayout& layout, const std::vector<unsigned char>& table) {
+    auto primaryHeader = header(layout, false, crc32(table.data(), table.size()));
+    std::vector<unsigned char> primary(65536, 0);
+    primary[447] = 0; primary[448] = 2; primary[449] = 0; primary[450] = 0xee;
+    primary[451] = 0xff; primary[452] = 0xff; primary[453] = 0xff;
+    integer(primary, 454, 1, 4); integer(primary, 458, std::min<uint64_t>(layout.totalBytes / 512 - 1, 0xffffffff), 4);
+    primary[510] = 0x55; primary[511] = 0xaa;
+    std::copy(primaryHeader.begin(), primaryHeader.end(), primary.begin() + 512);
+    std::copy(table.begin(), table.end(), primary.begin() + 1024);
+    return primary;
+}
 static void check_image_header(const std::string& role, const fs::path& file) {
     std::ifstream stream(file, std::ios::binary);
     std::array<unsigned char, 4096> bytes{};
@@ -167,15 +178,7 @@ json install_disk(const json& binding, const fs::path& newDirectory, uint64_t to
                                      ". Installation was not registered; check the required image-tool patches.");
     };
     auto table = entries(layout);
-    auto primaryHeader = header(layout, false, crc32(table.data(), table.size()));
-    std::vector<unsigned char> primary(65536, 0);
-    primary[447] = 0; primary[448] = 2; primary[449] = 0; primary[450] = 0xee;
-    primary[451] = 0xff; primary[452] = 0xff; primary[453] = 0xff;
-    integer(primary, 454, 1, 4); integer(primary, 458, std::min<uint64_t>(layout.totalBytes / 512 - 1, 0xffffffff), 4);
-    primary[510] = 0x55; primary[511] = 0xaa;
-    std::copy(primaryHeader.begin(), primaryHeader.end(), primary.begin() + 512);
-    std::copy(table.begin(), table.end(), primary.begin() + 1024);
-    write_and_verify(0, primary);
+    write_and_verify(0, primary_table(layout, table));
     auto backupHeader = header(layout, true, crc32(table.data(), table.size()));
     auto backup = table; backup.insert(backup.end(), backupHeader.begin(), backupHeader.end());
     write_and_verify(totalBytes - backup.size(), backup);
@@ -216,5 +219,64 @@ json install_disk(const json& binding, const fs::path& newDirectory, uint64_t to
     output << record.dump(2) << '\n';
     if (!output) throw std::runtime_error("Could not write the immutable disk layout record.");
     return record;
+}
+void verify_installed_disk(const json& binding, const fs::path& directory, const json& installed, const fs::path& scratch) {
+    verify_qemu_binding(binding);
+    if (installed.at("layoutVersion") != "gpt-v1" || installed.at("sectorSizeBytes") != 512 ||
+        installed.at("alignmentBytes") != MiB || installed.at("diskFile") != "phone.qcow2" ||
+        installed.at("partitions").size() != 5 || !installed.at("totalBytes").is_number_unsigned())
+        throw std::runtime_error("Unsupported installed disk record.");
+    DiskLayout layout{installed.at("diskUuid").get<std::string>(), installed.at("totalBytes").get<uint64_t>(), {}};
+    if (!valid_instance_uuid(layout.uuid) || layout.totalBytes > INT64_MAX || layout.totalBytes < (8ULL << 30) ||
+        layout.totalBytes % (1ULL << 30)) throw std::runtime_error("Invalid immutable disk capacity/UUID.");
+    const std::array<const char*, 5> roles{"boot", "system", "vendor", "misc", "userdata"};
+    uint64_t next = MiB;
+    for (size_t i = 0; i < roles.size(); ++i) {
+        const auto& item = installed.at("partitions")[i];
+        auto length = item.at("lengthBytes").get<uint64_t>();
+        auto uuid = item.at("uuid").get<std::string>();
+        if (item.size() != 4 || item.at("name") != roles[i] || !item.at("offsetBytes").is_number_unsigned() ||
+            !item.at("lengthBytes").is_number_unsigned() || item.at("offsetBytes") != next ||
+            !valid_instance_uuid(uuid) || !length || length % MiB || next > layout.totalBytes || length > layout.totalBytes - next)
+            throw std::runtime_error("Invalid immutable GPT partition layout.");
+        layout.partitions.push_back({roles[i], uuid, next, length}); next += length;
+    }
+    if (layout.partitions[3].lengthBytes != 4 * MiB || layout.partitions[4].lengthBytes < (8ULL << 30) ||
+        next != (layout.totalBytes - 33 * 512) / MiB * MiB)
+        throw std::runtime_error("Installed GPT partitions do not consume the recorded total capacity.");
+    const auto& boot = installed.at("directBoot");
+    if (boot.at("kernel") != "boot/kernel" || boot.at("ramdisk") != "boot/ramdisk.img")
+        throw std::runtime_error("Foreign direct-boot cache path.");
+    for (const auto& role : {"kernel", "ramdisk"}) {
+        auto path = directory / utf16(boot.at(role).get<std::string>());
+        if (!fs::is_regular_file(path) || fs::is_symlink(path) || fs::file_size(path) != boot.at(std::string(role) + "Bytes") ||
+            sha256(path) != boot.at(std::string(role) + "Sha256").get<std::string>())
+            throw std::runtime_error("Installed direct-boot cache changed; start refused.");
+    }
+    if (fs::exists(scratch) || !fs::create_directory(scratch)) throw std::runtime_error("Disk validation scratch must be NEW.");
+    auto bin = fs::path(utf16(binding.at("binDirectory").get<std::string>()));
+    auto tool = [&](const std::vector<std::wstring>& args) {
+        auto result = image_tool(bin / "qemu-img.exe", directory, args);
+        if (result.exitCode) throw std::runtime_error("Installed disk validation failed: " + result.output);
+        return result.output;
+    };
+    auto info = parse_json_document(tool({L"info", L"--output=json", L"phone.qcow2"}));
+    if (info.at("format") != "qcow2" || info.at("virtual-size") != layout.totalBytes || info.contains("backing-filename"))
+        throw std::runtime_error("Disk was externally resized/replaced or uses a backing file; start refused.");
+    auto table = entries(layout);
+    auto backup = table, tail = header(layout, true, crc32(table.data(), table.size()));
+    backup.insert(backup.end(), tail.begin(), tail.end());
+    auto readback = [&](const wchar_t* name, uint64_t offset, const std::vector<unsigned char>& expected) {
+        auto path = scratch / name;
+        tool({L"dd", L"-f", L"qcow2", L"-O", L"raw", L"if=phone.qcow2", L"of=" + path.wstring(), L"bs=512",
+              L"skip=" + std::to_wstring(offset / 512), L"count=" + std::to_wstring((offset + expected.size()) / 512)});
+        std::ifstream input(path, std::ios::binary);
+        std::vector<unsigned char> actual((std::istreambuf_iterator<char>(input)), {}); input.close();
+        if (actual != expected) throw std::runtime_error("Installed GPT identity/CRC does not match the registry; start refused.");
+        fs::remove(path);
+    };
+    readback(L"primary.bin", 0, primary_table(layout, table));
+    readback(L"backup.bin", layout.totalBytes - backup.size(), backup);
+    fs::remove(scratch);
 }
 } // namespace kiki

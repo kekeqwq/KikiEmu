@@ -83,7 +83,7 @@ Command parse_command(const std::vector<std::wstring>& args) {
         {"create", {"system", "storage", "size", "qemu", "performance"}},
         {"set", {"id", "default", "qemu", "mem", "cpus", "performance"}},
         {"start", {"id"}}, {"stop", {"id"}}, {"info", {"id"}},
-        {"logs", {"id"}}, {"doctor", {"qemu"}}, {"delete", {"id", "force"}}
+        {"logs", {"id"}}, {"doctor", {"qemu"}}, {"delete", {"id", "force"}}, {"adb", {"id", "shell"}}
     };
     auto permitted = allowed.find(name);
     if (permitted == allowed.end()) throw std::runtime_error("Unknown command: " + name);
@@ -120,6 +120,7 @@ Command parse_command(const std::vector<std::wstring>& args) {
         }
     }
     if (name == "info" || name == "logs" || name == "stop" || name == "delete") require("id");
+    if (name == "adb") { require("id"); require("shell"); }
     if (name == "delete" && !result.options.contains("force"))
         throw std::runtime_error("Deletion permanently removes all instance data. Use delete --force --id NN.");
     if (name == "create" || name == "set") resources(result);

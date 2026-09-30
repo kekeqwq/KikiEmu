@@ -257,16 +257,35 @@ void delete_storage(const StorageIdentity& identity, const std::vector<fs::path>
     check_identity_fields(identity); safe_target(identity.directory, protectedTrees);
     if (!stopOwnedRuntime) throw std::runtime_error("Deletion requires an explicit owned-runtime stop operation.");
     auto parents = pin_ancestors(identity.directory);
-    auto root = open_path(identity.directory, DELETE | FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES);
+    // Read-only pins coexist with the supervisor's running StorageLease.
+    // Asking for DELETE access now would fail BEFORE the owned process can
+    // be stopped, making --delete --force unusable for a live instance.
+    auto root = open_path(identity.directory, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES);
     const auto info = information(root->value);
     if (!(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || info.dwVolumeSerialNumber != identity.volumeSerial ||
         file_id(info) != identity.directoryFileId)
         throw std::runtime_error("Registered storage directory identity changed; deletion refused.");
-    auto marker = open_path(identity.directory / ownerName, GENERIC_READ | DELETE | FILE_READ_ATTRIBUTES);
+    auto marker = open_path(identity.directory / ownerName, GENERIC_READ | FILE_READ_ATTRIBUTES);
     if (read_owner(marker->value) != storage_identity_json(identity))
         throw std::runtime_error("Storage ownership does not match the manager registration; deletion refused.");
     uint64_t count = 0; preflight_tree(identity.directory, 0, count);
     stopOwnedRuntime(); // Throwing leaves the entire storage untouched.
+    // Keep the original objects alive while upgrading access. The first pins
+    // forbid rename through the stop callback; overlapping delete-sharing
+    // read handles retain their exact file IDs during the upgrade. A path
+    // replacement is refused BEFORE any storage contents are removed.
+    const auto markerInfo = information(marker->value);
+    auto rootIdentity = open_path(identity.directory, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_DELETE);
+    auto markerIdentity = open_path(identity.directory / ownerName, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_DELETE);
+    root.reset(); marker.reset();
+    root = open_path(identity.directory, DELETE | FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES);
+    marker = open_path(identity.directory / ownerName, GENERIC_READ | DELETE | FILE_READ_ATTRIBUTES);
+    const auto deletionRoot = information(root->value), deletionMarker = information(marker->value);
+    if (deletionRoot.dwVolumeSerialNumber != info.dwVolumeSerialNumber || file_id(deletionRoot) != file_id(info) ||
+        deletionMarker.dwVolumeSerialNumber != markerInfo.dwVolumeSerialNumber || file_id(deletionMarker) != file_id(markerInfo) ||
+        read_owner(marker->value) != storage_identity_json(identity))
+        throw std::runtime_error("Storage identity changed during runtime stop; deletion refused.");
+    rootIdentity.reset(); markerIdentity.reset();
     count = 0; remove_contents(identity.directory, 0, count, true);
     // Marker survives partial failure and is the LAST file removed.
     if (entries(identity.directory).size() != 1)

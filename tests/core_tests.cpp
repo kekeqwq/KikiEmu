@@ -15,6 +15,9 @@
 #include "../src/kikiemu/registry.hpp"
 #include "../src/kikiemu/package.hpp"
 #include "../src/kikiemu/manager.hpp"
+#include "../src/kikiemu/process.hpp"
+#include "../src/kikiemu/transport.hpp"
+#include "../src/kikiemu/session.hpp"
 #include "package_contract.generated.hpp"
 #define LIBARCHIVE_STATIC
 #include <archive.h>
@@ -23,6 +26,7 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include "wire_fixture.hpp"
 
 static unsigned passed = 0;
 static void check(bool condition, const char* name) {
@@ -107,6 +111,16 @@ static void fixture_zip(const kiki::fs::path& path, const std::vector<std::pair<
     if (archive_write_close(writer) != ARCHIVE_OK) throw std::runtime_error("Could not close fixture ZIP.");
 }
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 4 && std::wstring(argv[1]) == L"--leased-library-test-child") {
+        try {
+            std::ifstream input{ kiki::fs::path(argv[2]) }; std::string text((std::istreambuf_iterator<char>(input)), {});
+            kiki::StorageLease lease(kiki::parse_storage_identity(kiki::parse_json_document(text)));
+            { std::ofstream ready{kiki::fs::path(argv[3])}; ready << "READY\n"; }
+            Sleep(INFINITE); return 0;
+        } catch (...) { return 30; }
+    }
+    if (argc == 5 && std::wstring(argv[1]) == L"--wire-library-test-child")
+        return wire_fixture::serve(static_cast<uint16_t>(std::stoul(argv[2])), argv[3], argv[4]);
     if (argc == 2 && std::wstring(argv[1]) == L"--owned-library-test-child") {
         Sleep(INFINITE); return 0;
     }
@@ -513,6 +527,100 @@ int wmain(int argc, wchar_t** argv) {
                   "manager API deletion persists unregister/default cleanup and removes only its fixture storage");
         }
         fs::remove(managerRoot / "registry.json"); fs::remove(managerRoot / "registry.lock"); fs::remove(managerRoot);
+        wchar_t self[32768]; auto selfLength = GetModuleFileNameW(nullptr, self, 32768);
+        check(selfLength && selfLength < 32768, "private fixture executable located");
+        auto selfExe = fs::path(self);
+        HANDLE childHandle = nullptr;
+        auto suspendedLog = temp / "suspended-child.log";
+        {
+            PrivateChild child(selfExe, temp, {L"--owned-library-test-child"}, {}, suspendedLog);
+            auto identity = describe_owned_process(child.pid(), selfExe, new_instance_uuid(), "release", "supervisor");
+            check(owned_process_is_live(identity) && child.running(), "new private child is owned while suspended");
+            childHandle = OpenProcess(SYNCHRONIZE, FALSE, child.pid());
+            check(childHandle != nullptr, "owned suspended fixture handle pinned");
+        }
+        check(WaitForSingleObject(childHandle, 0) == WAIT_OBJECT_0, "unregistered suspended child cannot be stranded"); CloseHandle(childHandle);
+        fs::remove(suspendedLog);
+        auto ownedLog = temp / "owned-job-child.log";
+        {
+            PrivateChild child(selfExe, temp, {L"--owned-library-test-child"}, {}, ownedLog);
+            childHandle = OpenProcess(SYNCHRONIZE, FALSE, child.pid()); child.resume();
+            check(child.running(), "private owned job resumes without a console");
+            rejects([&] { child.resume(); }, "private child resumed twice");
+        }
+        check(WaitForSingleObject(childHandle, 0) == WAIT_OBJECT_0, "owned job stopped and reaped before storage release"); CloseHandle(childHandle);
+        fs::remove(ownedLog);
+        auto liveStorage = temp / "live-lease-disk", liveRegistry = temp / "live-lease-registry";
+        auto liveOwner = create_storage(liveStorage, new_instance_uuid(), "release", {fakeBin, liveRegistry});
+        auto leaseSource = temp / "live-owner-fixture.json", leaseReady = temp / "live-lease-ready.txt", leaseLog = temp / "live-lease.log";
+        write_fixture(leaseSource, storage_identity_json(liveOwner).dump());
+        write_fixture(liveStorage / "keep-until-stop.txt", "owned fixture only");
+        {
+            PrivateChild child(selfExe, temp, {L"--leased-library-test-child", leaseSource.wstring(), leaseReady.wstring()}, {}, leaseLog);
+            auto process = describe_owned_process(child.pid(), selfExe, liveOwner.instanceUuid, "release", "supervisor");
+            child.resume(); const auto until = GetTickCount64() + 5000;
+            while (!fs::exists(leaseReady) && child.running() && GetTickCount64() < until) Sleep(10);
+            check(fs::exists(leaseReady), "registered running supervisor holds a real storage lease");
+            RegistryTransaction registry(liveRegistry, "release");
+            auto id = registry.register_installed(liveOwner, {{"layout", {{"totalBytes", 32ULL << 30}}}},
+                {{"binDirectory", utf8(fakeBin.wstring())}}, Resources{});
+            registry.set_default(id);
+            registry.instance(id)["runtime"] = {{"instanceUuid", liveOwner.instanceUuid}, {"channel", "release"},
+                {"processes", nlohmann::json::array({owned_process_json(process)})}, {"endpoints", nlohmann::json::array()}};
+            registry.instance(id)["lifecycle"] = "running"; registry.save();
+            check(registry.delete_instance(id, {}) && child.wait(5000) && !fs::exists(liveStorage),
+                  "force delete stops leased running supervisor BEFORE upgrading access and removing storage");
+            check(registry.state().at("instances").empty() && registry.state().at("defaultId").is_null(),
+                  "live leased deletion unregisters and clears default atomically");
+        }
+        fs::remove(leaseSource); fs::remove(leaseReady); fs::remove(leaseLog);
+        fs::remove(liveRegistry / "registry.json"); fs::remove(liveRegistry / "registry.lock"); fs::remove(liveRegistry);
+        nlohmann::json launchFixture = {{"owner", storage_identity_json(createdOwner)},
+            {"immutableSource", {{"layout", {{"partitions", nlohmann::json::array({{{"name", "boot"}, {"uuid", new_instance_uuid()}}})}}}}},
+            {"configuration", {{"qemu", {{"binDirectory", utf8(fakeBin.wstring())}}},
+                {"resources", {{"cpus", uint32_t(8)}, {"memoryBytes", 4ULL << 30}}}}}};
+        auto plan = runtime_plan(launchFixture, manager, new_instance_uuid(), 60001, 60002, 60003);
+        check(plan.serial == "kiki-release-" + createdOwner.instanceUuid && plan.environment.at(L"KIKI_SDL_WINDOW_TITLE") == L"KikiEmu",
+              "release runtime serial and title are isolated from development");
+        check(plan.arguments.at(7) == L"host" && plan.environment.at(L"KIKI_SDL_DISABLE_GRAB") == L"1" &&
+              plan.environment.at(L"KIKI_SDL_START_WIDTH") == L"1003" && plan.environment.at(L"KIKI_SDL_START_HEIGHT") == L"1556",
+              "runtime plan keeps validated paired WHPX/native SDL/input/window baseline");
+        check(std::find(plan.arguments.begin(), plan.arguments.end(), L"sdl,gl=on") != plan.arguments.end() &&
+              std::find(plan.arguments.begin(), plan.arguments.end(), L"-snapshot") == plan.arguments.end(),
+              "runtime plan uses native accelerated persistent storage, not snapshots");
+        rejects([&] { runtime_plan(launchFixture, manager, new_instance_uuid(), 5555, 60002, 60003); }, "runtime plan accepted development ADB port");
+        rejects([&] { runtime_plan(launchFixture, manager, new_instance_uuid(), 60001, 60001, 60003); }, "runtime plan accepted colliding endpoints");
+        auto privateWire = [&](const std::wstring& mode, const std::function<void(const OwnedProcess&, uint16_t)>& operation) {
+            PortReservation reserved; auto port = reserved.port();
+            check(port != 5555 && port != 5037 && port != 4447 && port != 4455, "wire fixture stays outside global/development ports");
+            auto log = temp / (mode + L"-wire.log"), ready = temp / (mode + L"-ready.txt");
+            {
+                PrivateChild child(selfExe, temp, {L"--wire-library-test-child", std::to_wstring(port), mode, ready.wstring()}, {}, log);
+                auto identity = describe_owned_process(child.pid(), selfExe, new_instance_uuid(), "release", "qemu");
+                reserved.release(); child.resume(); const auto until = GetTickCount64() + 5000;
+                while (!fs::exists(ready) && child.running() && GetTickCount64() < until) Sleep(10);
+                check(fs::exists(ready), "exact owned fake adbd ready");
+                operation(identity, port);
+                if (mode == L"success") check(child.wait(5000) && child.exit_code() == 0, "fake adbd validates complete wire handshake and acknowledgement");
+            }
+            fs::remove(log); fs::remove(ready);
+        };
+        privateWire(L"success", [&](const OwnedProcess& process, uint16_t port) {
+            auto result = guest_shell(process, port, "echo fixture");
+            check(result.output == "fixture\n" && result.error == "warning\n" && result.exitCode == 7,
+                  "private ADB handles fragmented/coalesced shell-v2 stdout stderr and exit status");
+        });
+        for (const auto& mode : {L"corrupt", L"foreign-stream", L"no-exit", L"timeout"})
+            privateWire(mode, [&](const OwnedProcess& process, uint16_t port) {
+                rejects([&] { guest_shell(process, port, "echo fixture", 200); }, "invalid/foreign/incomplete/stalled ADB stream accepted");
+            });
+        privateWire(L"foreign-owner", [&](const OwnedProcess& process, uint16_t port) {
+            auto invalid = process; ++invalid.creationTime;
+            rejects([&] { guest_shell(invalid, port, "echo fixture"); }, "private ADB accepted PID creation mismatch");
+            invalid = process; invalid.role = "supervisor";
+            rejects([&] { guest_shell(invalid, port, "echo fixture"); }, "private ADB accepted non-QEMU role");
+            rejects([&] { guest_shell(process, port, ""); }, "private ADB accepted empty command");
+        });
         // Exact, nonrecursive cleanup of the remaining fixtures we just created.
         fs::remove(neighbour); fs::remove(outside / "keep.txt"); fs::remove(outside);
         fs::remove(registryRoot / "registry.json"); fs::remove(registryRoot / "registry.lock");

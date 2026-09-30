@@ -76,9 +76,12 @@ void validate(const json& state, const std::string& channel) {
         if (runtime.is_null()) {
             if (lifecycle == "running" || lifecycle == "starting") throw std::runtime_error("Live lifecycle has no owned runtime.");
         } else {
-            if (!runtime.is_object() || runtime.size() != 4 || runtime.at("instanceUuid") != owner.instanceUuid ||
+            if (!runtime.is_object() || (runtime.size() != 4 && runtime.size() != 5) || runtime.at("instanceUuid") != owner.instanceUuid ||
                 runtime.at("channel") != channel || !runtime.at("processes").is_array() || !runtime.at("endpoints").is_array())
                 throw std::runtime_error("Foreign runtime registration.");
+            if (runtime.size() == 5 && (!runtime.contains("sessionUuid") || !runtime.at("sessionUuid").is_string() ||
+                !valid_instance_uuid(runtime.at("sessionUuid").get<std::string>())))
+                throw std::runtime_error("Invalid owned session identity.");
             for (const auto& process : runtime.at("processes")) {
                 auto value = parse_owned_process(process);
                 if (value.instanceUuid != owner.instanceUuid || value.channel != channel)

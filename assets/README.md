@@ -2,7 +2,8 @@
 
 `kikiemu-icon.png` is the transparent square master; `kikiemu.ico` contains
 16/24/32/48/64/128/256-pixel PNG frames for the native Windows applications,
-installer and shortcuts. The actual installer/resource integration is pending.
+installer and shortcuts. Native CLI/desktop resource integration is implemented;
+installer and installed shortcut acceptance is pending.
 No host desktop icon or Android wallpaper was changed.
 
 Created 2026-09-30 using the built-in image_gen tool via the imagegen skill,

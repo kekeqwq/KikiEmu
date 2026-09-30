@@ -18,10 +18,12 @@ fi
 # Windows-form path rather than an MSYS path that becomes an unparseable C:/….
 mingw_prefix=${MINGW_PREFIX:-/clangarm64}
 pkgconfig_libdir=$(cygpath -w "$mingw_prefix/lib/pkgconfig")
-pkgconfig_sysroot=$(cygpath -w /)
 export PKG_CONFIG_LIBDIR="$pkgconfig_libdir"
 export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
-export PKG_CONFIG_SYSROOT_DIR="$pkgconfig_sysroot"
+# This is a NATIVE Windows build. The .pc files already contain absolute
+# C:/msys64/clangarm64 prefixes. A cross sysroot would incorrectly produce
+# C:/msys64/C:/msys64/... and hide glib.h behind a misleading sizeof error.
+unset PKG_CONFIG_SYSROOT_DIR
 [[ -x "$mingw_prefix/bin/pkgconf.exe" ]] || {
     echo 'Install mingw-w64-clang-aarch64-pkgconf; do not use MSYS/x86 pkg-config with Windows-form paths.' >&2
     exit 2
@@ -57,6 +59,9 @@ if [[ ${KIKI_BOOT_CONSOLE:-1} == 1 ]]; then
     git -C "$source_dir" apply --check "$repo_root/patches/qemu-sdl-boot-console.patch"
     git -C "$source_dir" apply "$repo_root/patches/qemu-sdl-boot-console.patch"
 fi
+
+git -C "$source_dir" apply --check "$repo_root/patches/qemu-sdl-channel-title.patch"
+git -C "$source_dir" apply "$repo_root/patches/qemu-sdl-channel-title.patch"
 
 mkdir -p "$source_dir/build"
 (

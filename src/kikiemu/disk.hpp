@@ -26,4 +26,9 @@ nlohmann::json install_disk(const nlohmann::json& qemuBinding, const fs::path& n
                            uint64_t totalBytes, const std::map<std::string, fs::path>& payloads,
                            uint64_t minimumDataBytes,
                            const std::map<std::string, std::string>& manifestHashes = {});
+// Before the FIRST writer is started: compare qcow2 format/capacity/backing,
+// both GPT tables and direct-boot caches with the immutable installation
+// record. Userdata is mutable and is deliberately NOT hashed or reformatted.
+void verify_installed_disk(const nlohmann::json& binding, const fs::path& directory,
+                           const nlohmann::json& installed, const fs::path& newScratchDirectory);
 } // namespace kiki
