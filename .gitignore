@@ -9,6 +9,12 @@
 !/BASELINE_20260930.md
 !/BOOT_CONSOLE.md
 !/RELEASE_PLAN.md
+!/LICENSE
+!/LICENSING.md
+!/src/
+!/src/**
+!/tests/
+!/tests/**
 !/patches/
 /patches/*
 !/patches/qemu-kikiaosp-tested-surface-20260929.patch
@@ -31,6 +37,8 @@
 !/tools/
 /tools/*
 !/tools/build_qemu_arm64.sh
+!/tools/build_kikiemu_core.ps1
+!/tools/export_qemu_runtime.ps1
 !/tools/build_surface_camera_bridge.ps1
 !/tools/run_kikiaosp_surface_camera.ps1
 !/tools/run_kikiaosp_local.ps1

@@ -2,6 +2,7 @@ param(
   [string]$Tag,
   [string]$BundleDir = (Join-Path $PSScriptRoot '..\bundles\surface-main-20260930'),
   [string]$QemuPath = (Join-Path $PSScriptRoot 'qemu-boot-src\build\qemu-system-aarch64.exe'),
+  [string]$QemuRomDirectory,
   [string]$Msys2Bin = 'C:\msys64\clangarm64\bin',
   [string]$KernelImage = 'kernel-linux-7.3-rc4-4k-fencefix-20260927',
   [string]$SystemImage = 'system-kikiaosp-cp2a-theme-picker-20260930.img',
@@ -94,6 +95,11 @@ if ([string]::IsNullOrWhiteSpace($Tag)) {
 }
 $images = (Resolve-Path -LiteralPath $BundleDir).Path
 $qemu = (Resolve-Path -LiteralPath $QemuPath).Path
+if (-not $QemuRomDirectory) {
+  $privateRoms = Join-Path (Split-Path $qemu -Parent) 'roms'
+  if (Test-Path -LiteralPath $privateRoms -PathType Container) { $QemuRomDirectory = $privateRoms }
+}
+if ($QemuRomDirectory) { $QemuRomDirectory = (Resolve-Path -LiteralPath $QemuRomDirectory).Path }
 $qemuSha256 = (Get-FileHash -LiteralPath $qemu -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($DisplayBackend -eq 'sdl') {
   # A plain/old QEMU silently ignores our environment variables, reintroducing
@@ -184,6 +190,10 @@ if ($AudioStubOutput) {
   $append += ' androidboot.audio.tinyalsa.ignore_output=true'
 }
 $arguments = [System.Collections.Generic.List[string]]::new()
+if ($QemuRomDirectory) {
+  $arguments.Add('-L')
+  $arguments.Add($QemuRomDirectory)
+}
 foreach ($item in @('-M','virt','-accel','whpx','-cpu','host','-m','4096','-smp',[string]$VcpuCount,'-parallel','none','-kernel',$kernel,'-initrd',(Join-Path $images 'kiki-kernel-ramdisk-rc4-clean-odm-adb.img'),'-append',$append)) {
   $arguments.Add($item)
 }

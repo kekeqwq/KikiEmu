@@ -72,6 +72,7 @@ mkdir -p "$source_dir/build"
         --disable-docs \
         --disable-dbus-display
 )
-ninja -C "$source_dir/build" -j "${KIKI_BUILD_JOBS:-8}" qemu-system-aarch64.exe
+ninja -C "$source_dir/build" -j "${KIKI_BUILD_JOBS:-8}" \
+    qemu-system-aarch64.exe qemu-img.exe qemu-io.exe
 "$source_dir/build/qemu-system-aarch64.exe" --version
 echo "QEMU ready: $source_dir/build/qemu-system-aarch64.exe"

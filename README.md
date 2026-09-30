@@ -6,7 +6,7 @@
 | --- | --- |
 | [kikiaosp_test](https://github.com/kekeqwq/kikiaosp_test) | Android 17 设备树、AOSP 集成补丁、源码审计、system/vendor 镜像；维护系统安装包标准与干净发行规划 |
 | [kikiaosp_kernel](https://github.com/kekeqwq/kikiaosp_kernel) | Linux 7.3-rc4 4 KiB 内核与 Nix 构建 |
-| 本仓库 | Windows ARM64 QEMU 补丁及构建、摄像头桥接、开发镜像收集/启动/测试；终端用户安装器、系统包消费与实例管理规划 |
+| 本仓库 | Windows ARM64 QEMU 补丁及构建、摄像头桥接、开发镜像收集/启动/测试；终端用户配置管理器、系统安装器与桌面启动入口 |
 
 ## 当前主线：2026-09-30
 
@@ -72,7 +72,43 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH
 
 摄像头桥接源代码和构建脚本都在本仓库。桥接默认输出 `tools/build/surface-camera-bridge.exe`；不采集麦克风、不改 Windows 相机全局配置。
 
-## 3. 收集、校验并打包
+### 发行版使用用户指定的 QEMU
+
+0.1 的模块边界：KikiEmu 只做配置管理、系统安装和按配置启动；KikiAOSP ZIP 只包含系统必需文件及配套内核；QEMU 由用户独立构建/提供。以下是**正在实现的发行接口**，不是已经交付的安装包：
+
+```powershell
+kikiemu create --system ~/Downloads/KikiAOSP-0.1.0-alpha-arm64.zip --storage ~/MyAndroid --size 200g --qemu ~/Tools/KikiQemu/bin
+kikiemu set --id 01 --qemu ~/Tools/KikiQemu-v2/bin
+```
+
+也接受 `kikiemu --create ...`、`kikiemu --set ...`。`create` 的 system/storage/size/qemu 四项必填；`--performance` 可选。`g` 表示 GiB；size 为手机总容量，创建后禁止修改。`--qemu` 指 **bin 目录**，不是 EXE 文件；该目录至少包含 `qemu-system-aarch64.exe`、`qemu-img.exe`、`qemu-io.exe`、配套第三方 DLL 和 `roms/`。兼容的路径变更不重装系统、不改用户磁盘，运行中的实例保持原配置，下次启动生效。
+
+从上面 CLANGARM64 环境按仓库固定提交/补丁构建到新的目录，避免覆盖已经绑定给正式实例的运行库：
+
+```bash
+./tools/build_qemu_arm64.sh "$PWD/tools/qemu-release-0_1-src"
+# 同时构建 qemu-system-aarch64.exe、qemu-img.exe、qemu-io.exe。
+```
+
+在 PowerShell 7 构建原生的内部目录检查工具，并导出一个独立运行目录（路径含空格时保留引号）：
+
+```powershell
+# MSYS2 CLANGARM64 开发依赖；在该终端用 pacman 安装：
+# pacman -S --needed mingw-w64-clang-aarch64-nlohmann-json
+$env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH  # 仅当前开发终端，不是安装器改 PATH
+.\tools\build_kikiemu_core.ps1
+.\tools\export_qemu_runtime.ps1 -BuildDirectory .\tools\qemu-release-0_1-src\build -OutputBin "$HOME\Tools\KikiQemu\bin"
+```
+
+导出器只接受新目录，收集本次构建的 ARM64 EXE、静态导入的 DLL 依赖链和 ROM，记录哈希，并检查导出结果不再依赖 MSYS2 DLL 目录。`DependencyBin` 只是**构建导出输入**，不是用户启动时的 fallback。目录检查不启动虚拟机，也不安装程序、改注册表或修改用户实例。
+
+当前检查工具是开发阶段产物，不是发布版 CLI；静态补丁标记/PE/DLL 检查不能代替 GPT 启动 ABI、动态加载模块、宿主 OpenGL/Mesa D3D12 → Adreno 和完整系统实测。现有两组稳定 QEMU 补丁及其构建命令已可复现开发基线；正式版标题/隔离能力与新磁盘 ABI 仍在实现，完成后会同步更新构建补丁，不能把这次导出直接称作已验收发布版。
+
+发行启动将只使用实例保存的规范化 QEMU 路径及已验证文件身份；缺失、不兼容或文件变化时给出英文错误，不搜索 PATH、不回退到旧开发 EXE、不自动换成软件渲染。正式和 Dev 使用独立 bin/output 目录。KikiEmu 卸载不删除用户提供的 QEMU 或用户磁盘。
+
+安装器、CLI 初始化、PATH/快捷方式和卸载的用户视角验收由用户执行；本轮开发不运行 setup.exe 或修改用户 PATH。构建检查与系统本身的启动/图形/持久化回归由开发侧负责，待候选准备好后交付用户。
+
+## 3. 收集、校验并打包（现有开发基线）
 
 Windows 需要 PowerShell 7、OpenSSH、支持 zstd 的 `tar`、Android `adb`，以及免密访问构建机。预留至少 12 GiB 本地空间：
 
@@ -85,7 +121,7 @@ ssh keke@192.168.2.185 'git -C ~/projects/kikiaosp_test status --short'
 
 本次已验收的 system/vendor 和兼容 product/system_ext 固定存于 185 设备仓库的 `output/`，不再依赖会随下一次构建变化的 `out/`。`sourceRepository: device` 指向该目录；未指定时仍兼容旧清单的 AOSP 输出路径。
 
-镜像、QEMU 源码/二进制、运行依赖和辅助压缩包均不纳入 Git。辅助包 `kikiaosp-runtime-support-20260926.tar.zst` 只有约 21 MiB，但包含 8 GiB 基础 userdata、冻结 ramdisk、misc 与空辅助盘；它不是本次 `m systemimage vendorimage` 自动产物。从源码重建同哈希 ramdisk 的配方尚未完成，换机器必须迁移这项资产以及冻结的兼容磁盘，不能假装只 clone Git 就完全取得运行环境。
+镜像、QEMU 源码/二进制、运行依赖和辅助压缩包均不纳入 Git。辅助包 `kikiaosp-runtime-support-20260926.tar.zst` 只有约 21 MiB，但包含 8 GiB 基础 userdata、冻结 ramdisk、misc 与空辅助盘；它不是本次 `m systemimage vendorimage` 自动产物。复现上述冻结基线仍须迁移这些旧资产。发行分支另有设备侧 [源码生成 boot/initramfs 的原型](https://github.com/kekeqwq/kikiaosp_test/blob/feat/release-0_1-alpha/docs/BOOT_PAYLOAD.md)，已在同组开发系统镜像下实测启动；它不重建旧 ramdisk 的同一哈希，不证明新 GPT/新 userdata 或干净发行镜像已完成。
 
 ## 4. 启动、检查和退出
 
@@ -112,7 +148,7 @@ QEMU 在后台无控制台运行。监控仅监听 `127.0.0.1:4447`，ADB `127.0
 
 ## 开发规则
 
-0.1 Alpha 目前只做发布规划，见 [RELEASE_PLAN.md](RELEASE_PLAN.md)。正式系统包仅交付干净构建的安装材料，不包含用户磁盘；客户端新建固定总容量、动态占用的持久化磁盘。现有冻结 bundle/collector 是开发回溯格式，不是公开发版格式。系统包合同由 kikiaosp_test 维护，格式/schema/语义校验及双方兼容性测试在首个原型通过后冻结。正式与开发版本的身份、私有运行库、数据、ADB/控制/相机端点隔离必须在0.1发布前完成；用户正式实例运行时推进开发的误操作防护是永久发布门槛。
+0.1 Alpha 已进入独立发布分支实现，尚未产出已验收的 setup.exe/系统 ZIP，见 [RELEASE_PLAN.md](RELEASE_PLAN.md)。正式系统包仅交付干净构建的安装材料，不包含用户磁盘；客户端新建固定总容量、动态占用的持久化磁盘。现有冻结 bundle/collector 是开发回溯格式，不是公开发版格式。系统包合同由 kikiaosp_test 维护，格式/schema/语义校验及双方兼容性测试在首个原型通过后冻结。QEMU 通过 create/set --qemu 指定并校验，不强制内置。正式与开发版本的身份、独立运行库、数据、ADB/控制/相机端点隔离必须在0.1发布前完成；用户正式实例运行时推进开发的误操作防护是永久发布门槛。
 
 原生 SDL 启动控制台已通过实际启动和用户验收，纳入默认主线；Android/内核资产不变。遮罩前的冻结基线见 [surface-main-pre-boot-console-20260930.json](profiles/surface-main-pre-boot-console-20260930.json)，仅用于显式回溯。构建、状态判断和证据边界见 [BOOT_CONSOLE.md](BOOT_CONSOLE.md)。
 

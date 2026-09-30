@@ -10,5 +10,9 @@
 /BASELINE_20260930.md text eol=lf
 /BOOT_CONSOLE.md text eol=lf
 /RELEASE_PLAN.md text eol=lf
+/LICENSE text eol=lf
+/LICENSING.md text eol=lf
+/src/** text eol=lf
+/tests/** text eol=lf
 /.gitignore text eol=lf
 /.gitattributes text eol=lf
