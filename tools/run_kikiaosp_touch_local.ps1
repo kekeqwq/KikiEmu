@@ -35,6 +35,9 @@ param(
   [switch]$InputTrace,
   [switch]$ResolutionTrace,
   [switch]$TraceVirglFences,
+  [switch]$SurfaceCameras,
+  [string]$SurfaceCameraBridgePath = (Join-Path $PSScriptRoot 'build\surface-camera-bridge.exe'),
+  [ValidateRange(1024, 65535)][int]$SurfaceCameraPort = 4455,
   [switch]$SdlKeyboardTrace,
   [string]$TraceEventsPath,
   [switch]$GlobalFpsProfile,
@@ -85,6 +88,46 @@ if ([string]::IsNullOrWhiteSpace($Tag)) {
 }
 $images = (Resolve-Path -LiteralPath $BundleDir).Path
 $qemu = (Resolve-Path -LiteralPath $QemuPath).Path
+$qemuSha256 = (Get-FileHash -LiteralPath $qemu -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($DisplayBackend -eq 'sdl') {
+  # A plain/old QEMU silently ignores our environment variables, reintroducing
+  # giant DPI-scaled windows, mouse grab and the wrong guest refresh rate.
+  # Check compiled feature markers before starting WHPX or opening a window.
+  $requiredSdlFeatures = @('KIKI_SDL_DISABLE_GRAB', 'KIKI_SDL_DISABLE_IME', 'KIKI_SDL_GUEST_REFRESH_RATE_HZ')
+  if ($NativeResolution) {
+    $requiredSdlFeatures += @('KIKI_SDL_NATIVE_PIXELS', 'KIKI_SDL_START_WIDTH', 'KIKI_SDL_START_HEIGHT')
+  }
+  $foundSdlFeatures = [bool[]]::new($requiredSdlFeatures.Count)
+  $qemuFeatureStream = [IO.File]::OpenRead($qemu)
+  try {
+    $qemuFeatureBuffer = [byte[]]::new(65536)
+    $featureTail = ''
+    $remainingFeatures = $requiredSdlFeatures.Count
+    while ($remainingFeatures -gt 0 -and ($readCount = $qemuFeatureStream.Read($qemuFeatureBuffer, 0, $qemuFeatureBuffer.Length)) -gt 0) {
+      $featureChunk = $featureTail + [Text.Encoding]::ASCII.GetString($qemuFeatureBuffer, 0, $readCount)
+      for ($featureIndex = 0; $featureIndex -lt $requiredSdlFeatures.Count; $featureIndex++) {
+        if (-not $foundSdlFeatures[$featureIndex] -and $featureChunk.Contains($requiredSdlFeatures[$featureIndex])) {
+          $foundSdlFeatures[$featureIndex] = $true
+          $remainingFeatures--
+        }
+      }
+      $featureTail = $featureChunk.Substring([Math]::Max(0, $featureChunk.Length - 64))
+    }
+    if ($remainingFeatures -gt 0) {
+      $missingFeatures = for ($featureIndex = 0; $featureIndex -lt $requiredSdlFeatures.Count; $featureIndex++) {
+        if (-not $foundSdlFeatures[$featureIndex]) { $requiredSdlFeatures[$featureIndex] }
+      }
+      throw "QEMU lacks the tested SDL Surface features: $($missingFeatures -join ', '). Refusing an incompatible executable: $qemu (SHA256=$qemuSha256)."
+    }
+  } finally {
+    $qemuFeatureStream.Dispose()
+  }
+}
+$cameraBridge = if ([IO.Path]::IsPathRooted($SurfaceCameraBridgePath)) {
+  $SurfaceCameraBridgePath
+} else {
+  Join-Path $PSScriptRoot $SurfaceCameraBridgePath
+}
 $kernel = if ([IO.Path]::IsPathRooted($KernelImage)) {
   $KernelImage
 } else {
@@ -93,10 +136,14 @@ $kernel = if ([IO.Path]::IsPathRooted($KernelImage)) {
 if (-not (Test-Path -LiteralPath $kernel)) { throw "Missing kernel image $kernel" }
 $serial = Join-Path $images "qemu-kikiaosp-$Tag.log"
 $logcat = Join-Path $images "qemu-kikiaosp-$Tag.logcat"
+$cameraBridgeLog = Join-Path $images "qemu-kikiaosp-$Tag.camera-bridge.log"
 $qemuTrace = Join-Path $images "qemu-kikiaosp-$Tag.qemu-trace.log"
 $globalFpsLog = Join-Path $images "qemu-kikiaosp-$Tag.global-fps.log"
 foreach ($path in @($serial, $logcat)) {
   if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite $path" }
+}
+if ($SurfaceCameras -and (Test-Path -LiteralPath $cameraBridgeLog)) {
+  throw "Refusing to overwrite $cameraBridgeLog"
 }
 if (($TraceVirglFences -or $SdlKeyboardTrace) -and (Test-Path -LiteralPath $qemuTrace)) {
   throw "Refusing to overwrite $qemuTrace"
@@ -106,6 +153,13 @@ if ($GlobalFpsProfile -and (Test-Path -LiteralPath $globalFpsLog)) {
 }
 if (-not $DryRun -and (Get-NetTCPConnection -State Listen -LocalPort 4447,5555 -ErrorAction SilentlyContinue)) {
   throw 'QEMU test ports 4447 or 5555 are already in use'
+}
+if ($SurfaceCameras -and -not (Test-Path -LiteralPath $cameraBridge -PathType Leaf)) {
+  throw "Surface camera bridge executable is missing: $cameraBridge. Build it with tools/build_surface_camera_bridge.ps1."
+}
+if ($SurfaceCameras -and -not $DryRun -and
+    (Get-NetTCPConnection -State Listen -LocalPort $SurfaceCameraPort -ErrorAction SilentlyContinue)) {
+  throw "Surface camera bridge port $SurfaceCameraPort is already in use"
 }
 
 $eglDriver = if ($GpuMode -eq 'Virgl') { 'mesa' } else { 'angle' }
@@ -212,9 +266,15 @@ if ($VirtioKeyboard) {
   $arguments.Add('-device')
   $arguments.Add('virtio-keyboard-pci')
 }
+if ($SurfaceCameras) {
+  $arguments.Add('-chardev')
+  $arguments.Add("socket,id=kiki-camera,host=127.0.0.1,port=$SurfaceCameraPort,server=on,wait=off")
+  $arguments.Add('-device')
+  $arguments.Add('virtserialport,bus=kiki-serial.0,chardev=kiki-camera,name=org.kikiaosp.camera')
+}
 
 if ($DryRun) {
-  "QEMU_EXE=$qemu GPU_MODE=$GpuMode HWC_MODE=$HwcMode RENDERENGINE_BACKEND=$RenderEngineBackend GPU_BLOB=$GpuBlob AUDIO_BACKEND=$AudioBackend GUEST_REFRESH_RATE_HZ=$GuestRefreshRateHz VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel SDL_KEY_TRACE=$SdlKeyboardTrace SDL_MOUSE_GRAB=$(if ($DisplayBackend -eq 'sdl') { 'disabled' } else { 'backend-default' }) GLOBAL_FPS_PROFILE=$GlobalFpsProfile PERSISTENT_DISKS=$PersistentDisks DRY_RUN=True"
+  "QEMU_EXE=$qemu GPU_MODE=$GpuMode HWC_MODE=$HwcMode RENDERENGINE_BACKEND=$RenderEngineBackend GPU_BLOB=$GpuBlob AUDIO_BACKEND=$AudioBackend GUEST_REFRESH_RATE_HZ=$GuestRefreshRateHz VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel SDL_KEY_TRACE=$SdlKeyboardTrace SDL_MOUSE_GRAB=$(if ($DisplayBackend -eq 'sdl') { 'disabled' } else { 'backend-default' }) GLOBAL_FPS_PROFILE=$GlobalFpsProfile SURFACE_CAMERAS=$SurfaceCameras SURFACE_CAMERA_PORT=$(if ($SurfaceCameras) { $SurfaceCameraPort } else { 'off' }) SURFACE_CAMERA_LOG=$(if ($SurfaceCameras) { $cameraBridgeLog } else { 'off' }) PERSISTENT_DISKS=$PersistentDisks DRY_RUN=True"
   for ($i = 0; $i -lt $arguments.Count; $i++) {
     "QEMU_ARG[$i]=$($arguments[$i])"
   }
@@ -293,6 +353,25 @@ Start-Sleep -Seconds 2
 if ($process.HasExited) {
   throw "QEMU exited with code $($process.ExitCode); inspect the serial log at $serial"
 }
+$cameraBridgeProcess = $null
+if ($SurfaceCameras) {
+  $parentPath = $env:PATH
+  if (Test-Path -LiteralPath $Msys2Bin -PathType Container) {
+    $env:PATH = "$Msys2Bin;$parentPath"
+  }
+  try {
+    $cameraBridgeProcess = Start-Process -FilePath $cameraBridge `
+      -ArgumentList @('--serve', '127.0.0.1', [string]$SurfaceCameraPort, $cameraBridgeLog) `
+      -WorkingDirectory $PSScriptRoot -NoNewWindow -PassThru
+  } finally {
+    $env:PATH = $parentPath
+  }
+  Start-Sleep -Milliseconds 500
+  if ($cameraBridgeProcess.HasExited) {
+    if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
+    throw "Surface camera bridge exited with code $($cameraBridgeProcess.ExitCode); see inherited terminal output"
+  }
+}
 $displayHelperPath = Join-Path $PSScriptRoot 'configure_kikiaosp_display.ps1'
 $displayLog = Join-Path $images "qemu-kikiaosp-$Tag.display.log"
 if (Test-Path -LiteralPath $displayLog) { throw "Refusing to overwrite $displayLog" }
@@ -301,4 +380,4 @@ $helperArguments = "-NoProfile -File `"$displayHelperPath`" -Serial 127.0.0.1:55
 $displayProcess = Start-Process -FilePath $pwshPath -ArgumentList $helperArguments `
   -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru
 $keyboardDevice = if ($VirtioKeyboard) { 'virtio-keyboard-pci' } else { 'none' }
-"QEMU_PID=$($process.Id) DISPLAY_BACKEND=$DisplayBackend AUDIO_BACKEND=$AudioBackend GTK_SWAP_INTERVAL=$GtkSwapInterval ANGLE_EGL=$AngleEgl DISPLAY_LOG=$displayLog SERIAL=$serial LOGCAT=$logcat QEMU_TRACE=$($TraceVirglFences -or $SdlKeyboardTrace ? $qemuTrace : 'off') SDL_KEY_TRACE=$SdlKeyboardTrace SDL_MOUSE_GRAB=$(if ($DisplayBackend -eq 'sdl') { 'disabled' } else { 'backend-default' }) GLOBAL_FPS_LOG=$($GlobalFpsProfile ? $globalFpsLog : 'off') GPU_MODE=$GpuMode HWC_MODE=$HwcMode RENDERENGINE_BACKEND=$RenderEngineBackend GPU_BLOB=$GpuBlob GUEST_REFRESH_RATE_HZ=$GuestRefreshRateHz VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel PARALLEL_PORT=disabled TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"
+"QEMU_PID=$($process.Id) QEMU_EXE=$qemu QEMU_SHA256=$qemuSha256 CAMERA_BRIDGE_PID=$($cameraBridgeProcess ? $cameraBridgeProcess.Id : 'off') CAMERA_BRIDGE_LOG=$(if ($SurfaceCameras) { $cameraBridgeLog } else { 'off' }) DISPLAY_BACKEND=$DisplayBackend AUDIO_BACKEND=$AudioBackend GTK_SWAP_INTERVAL=$GtkSwapInterval ANGLE_EGL=$AngleEgl DISPLAY_LOG=$displayLog SERIAL=$serial LOGCAT=$logcat QEMU_TRACE=$($TraceVirglFences -or $SdlKeyboardTrace ? $qemuTrace : 'off') SDL_KEY_TRACE=$SdlKeyboardTrace SDL_MOUSE_GRAB=$(if ($DisplayBackend -eq 'sdl') { 'disabled' } else { 'backend-default' }) GLOBAL_FPS_LOG=$($GlobalFpsProfile ? $globalFpsLog : 'off') GPU_MODE=$GpuMode HWC_MODE=$HwcMode RENDERENGINE_BACKEND=$RenderEngineBackend GPU_BLOB=$GpuBlob GUEST_REFRESH_RATE_HZ=$GuestRefreshRateHz VCPU_COUNT=$VcpuCount KERNEL_LOGLEVEL=$KernelLogLevel PARALLEL_PORT=disabled TOUCH_DEVICE=virtio-multitouch-pci KEYBOARD_DEVICE=$keyboardDevice SPEAKER_OUTPUT=$SpeakerOutput AUDIO_STUB_OUTPUT=$AudioStubOutput MOUSE_TOUCH_FALLBACK=$MouseTouchFallback INPUT_TRACE=$InputTrace RESOLUTION_TRACE=$ResolutionTrace NATIVE_RESOLUTION=$NativeResolution PORTRAIT_PIXELS=${PortraitWidthPixels}x${PortraitHeightPixels}"

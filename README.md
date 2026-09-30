@@ -10,6 +10,8 @@
 
 ## 当前已验证的配对
 
+2026-09-30 的 CP2A / Surface 前后摄新功能目前独立于下述旧冻结配对，参见 [相机功能、构建与启动说明](CAMERA_SUPPORT.md)。新配对使用稳定 SDL/VirGL QEMU、正向前后摄和 CPU YUV 拍照路径；不要混用旧 GTK EXE 或旧 vendor。
+
 `profiles/network-audio-20260926.json` 是当前主线配对。它固定设备树提交 `a371f1d`、内核提交 `ac04a34`、QEMU 上游提交 `5f664cd`。Windows ARM/WHPX 已验证 `sys.boot_completed=1`，ADB、Launcher3、Settings、Ethernet、扬声器 PCM、点按音和铃声试听可用。内核 SHA-256 为 `f33ef2371736dfd75122eaaf277223321117b57e572e235b5b35f558aa14db96`，system 为 `13c41b3d33b718075713d1472590a57b385f25610a2523bbe79d92a086df3636`，vendor 为 `67616fae719997d6a779e8d1c8a99c0de2ee8b7a72aa05c97c480bba56322eb2`。QEMU 的 PE Machine 为 `0xAA64`。此前的 Launcher3 + Settings 配对仍留在 `profiles/launcher3-settings-20260926.json`。
 
 真实像素动态分辨率已经收进主线，开发记录仍在 `feature/native-resolution-20260926`。Surface 的 Windows 桌面为 2880×1920、系统缩放为 200%；QEMU 默认手机窗口驱动客体为 864×1728，最大化后自动切换为 2784×1876，任意横向窗口实测为 2374×1530，恢复窗口又回到 864×1728。Windows 整桌截图逐项确认了 Android 的四边、状态栏、搜索框和三键导航完整可见，不再只显示左上角，也不是拉伸旧画布。三次模式切换中 SurfaceFlinger 和 Launcher3 PID 均未变化，触摸在分辨率稳定后可交互。该结论使用的内核 SHA-256 为 `e7ede20ab411b628f59f5345a7fa5da1155cd2a0a40dad45247f9498cacca06b`，vendor SHA-256 为 `674652a3e965c36b20fd50eff2e3bd7c7a2ae1553cc8a76be3d1ed0925efb396`。当前主线内核 `f33ef2371736dfd75122eaaf277223321117b57e572e235b5b35f558aa14db96` 保留该 EDID 补丁，并增加 virtio-sound 与 dma-buf system heap。

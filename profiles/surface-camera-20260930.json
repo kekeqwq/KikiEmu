@@ -1,0 +1,24 @@
+{
+  "id": "surface-camera-20260930",
+  "description": "CP2A Surface front/rear preview and CPU YUV photo capture on the tested SDL/VirGL display pipeline",
+  "status": "feature-branch regression, not a replacement for the frozen main baseline",
+  "bundleDirectory": "bundles/cp2a-camera2-20260930",
+  "aospBranch": "android17-release",
+  "aospReleaseConfig": "cp2a",
+  "qemuUpstreamCommit": "bde658eef6b38c45794bfd7ad4d2dd1b574e4694",
+  "qemuExe": "tools/qemu-src/build/qemu-system-aarch64.exe",
+  "testedQemuSha256": "5b92d13e421124d55e0420d3879cabdc491eeb3cf370332ec4bc84a57e4ff49a",
+  "display": { "backend": "sdl", "gpu": "Virgl", "blob": false, "width": 1003, "height": 1556, "density": 288, "fontScale": 1.5, "refreshRateHz": 120, "vcpu": 8, "memoryMiB": 4096 },
+  "camera": { "frontSensorOrientation": 0, "rearSensorOrientation": 0, "captureWidth": 640, "captureHeight": 480, "frontApi": "WinRT no-effects color passthrough", "rearApi": "Media Foundation SourceReader", "zeroCopy": false, "microphone": false },
+  "kernel": { "name": "kernel-linux-7.3-rc4-4k-fencefix-20260927", "bytes": 35613184, "sha256": "02c5439434feb3f1b5f5d63f82b2d3fbd6ccb8aa81f93d708f3d0f3bba9a7ce8" },
+  "system": { "name": "system-kikiaosp-cp2a-camera2-20260930.img", "bytes": 1106173952, "sha256": "b3bfbe706337aa71307cf293183a327ab3e09f3c39ed34f20f9ed46d5555ba20" },
+  "vendor": { "name": "vendor-kikiaosp-camera-virgl-final-20260930.img", "bytes": 101437440, "sha256": "115626c3ad9a31744389307e135e8a6a08922749ec1e02cf5f3b3d3cb2848350" },
+  "product": { "name": "product-kikiaosp-gallery-wallpaper-20260929.img", "bytes": 180330496, "sha256": "c3324ba568d0f00347dc1817c0ffc29f3a28500430393f71a1a871cd1084fe6e" },
+  "systemExt": { "name": "system_ext-kikiaosp-wallpaper-20260929.img", "bytes": 114982912, "sha256": "737402d393a04bfd767169e83b0c91fe03f60e5303343089bb84c93920b906ff" },
+  "supportFiles": [
+    { "name": "kiki-kernel-ramdisk-rc4-clean-odm-adb.img", "bytes": 21372169, "sha256": "f36d932efd062b7dcc440fa9d4c2a18cb4414fcea05ad0c48eb89e15ad824131" },
+    { "name": "userdata-kikiaosp17-f2fs.img", "bytes": 8589934592, "sha256": "ef599b4f275829df8e16fd29a2d8505470e70fe7efd4af18baefc7f9ca22281c" },
+    { "name": "misc.img", "bytes": 4194304, "sha256": "6374f685557c733c783cbb83853c68a3be18d0b16bb9658a17f685fcb7650413" },
+    { "name": "odm-kikiaosp17-empty.img", "bytes": 67108864, "sha256": "a35e49d5b5fb69b2aa3d2fd771a3b7779a620e5221754ef04e0d7e013d8bdb72" }
+  ]
+}

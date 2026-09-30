@@ -1,4 +1,5 @@
-param([string]$Tag = 'capture', [switch]$KeepWindowed)
+param([string]$Tag = 'capture', [switch]$KeepWindowed,
+      [ValidateRange(0, 2147483647)][int]$QemuProcessId = 0)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
@@ -27,10 +28,18 @@ public static class KikiDesktopQemuCapture {
 '@
 }
 
-$qemu = Get-Process -ErrorAction SilentlyContinue |
-  Where-Object ProcessName -Like 'qemu-system-aarch64*' |
-  Sort-Object StartTime -Descending |
-  Select-Object -First 1
+if ($QemuProcessId) {
+  $qemu = Get-Process -Id $QemuProcessId -ErrorAction Stop
+  if ($qemu.ProcessName -notlike 'qemu*' -or
+      [IO.Path]::GetFileName($qemu.Path) -notlike 'qemu*.exe') {
+    throw "Process $QemuProcessId is not a QEMU executable"
+  }
+} else {
+  $qemu = Get-Process -ErrorAction SilentlyContinue |
+    Where-Object ProcessName -Like 'qemu-system-aarch64*' |
+    Sort-Object StartTime -Descending |
+    Select-Object -First 1
+}
 if (-not $qemu) { throw 'No qemu-system-aarch64* process is running' }
 $qemuPid = [uint32]$qemu.Id
 $script:qemuGtkWindow = [IntPtr]::Zero
