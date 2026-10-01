@@ -460,6 +460,11 @@ int wmain(int argc, wchar_t** argv) {
             check(WaitForSingleObject(target.process, 0) == WAIT_OBJECT_0 && WaitForSingleObject(unrelated.process, 0) == WAIT_TIMEOUT,
                   "registry deletion kills only target child, leaves other running");
             check(fs::exists(fakeBin), "BYO QEMU directory is not deleted");
+            auto holePath = temp / "id-hole"; fs::create_directory(holePath);
+            auto holeOwner = claim_storage(holePath, new_instance_uuid(), "release");
+            check(registry.register_installed(holeOwner, nlohmann::json::object(), binding, {}) == "01", "new instance fills smallest ID hole without renumbering existing 02");
+            check(registry.instance("02").at("uuid") == uuidB && registry.ordered_ids() == std::vector<std::string>({"01", "02"}), "existing identity stays unchanged and list IDs are ordered");
+            check(registry.delete_instance("01", {}), "temporary reused-ID fixture deletes only its new storage");
             // Fail after external journal: invalid creation time must retain
             // storage, registration and default, then survive reopen/retry.
             registry.set_default("02");
@@ -480,16 +485,17 @@ int wmain(int argc, wchar_t** argv) {
                   fs::exists(instanceB / ".kikiemu-owner.json"), "partial filesystem failure retains owner, default and journal");
             CloseHandle(busy);
             check(registry.delete_instance("02", {}) && !fs::exists(instanceB), "retry completes exact failed deletion");
-            check(registry.state().at("nextId") == 3, "deleted display IDs are not silently reused");
+            check(registry.state().at("nextId") == 3, "legacy registry high-water counter stays compatible after deletion");
         }
         rejects([&] { RegistryTransaction wrongChannel(registryRoot, "dev"); }, "release registry opened through dev channel");
         const auto instanceC = temp / "C"; fs::create_directory(instanceC); write_fixture(instanceC / "disk", "test crash recovery");
         auto ownerC = claim_storage(instanceC, "b7773a04-ae8d-40f9-8c89-030377147c8a", "release");
         {
             RegistryTransaction registry(registryRoot, "release");
-            check(registry.register_installed(ownerC, nlohmann::json::object(), binding, {}) == "03", "registration after delete has fresh monotonic ID");
-            registry.set_default("03");
-            auto& c = registry.instance("03");
+            check(registry.register_installed(ownerC, nlohmann::json::object(), binding, {}) == "01", "empty registry restarts display IDs at 01");
+            check(registry.instance("01").at("uuid") == ownerC.instanceUuid, "reused display ID retains new UUID rather than deleted identity");
+            registry.set_default("01");
+            auto& c = registry.instance("01");
             c["lifecycle"] = "deleting"; c["deleteJournal"] = {{"instanceUuid", ownerC.instanceUuid}, {"owner", c.at("owner")}}; registry.save();
         }
         delete_storage(ownerC, {}, [] {}); // Simulate crash after files, before unregister.
@@ -497,13 +503,13 @@ int wmain(int argc, wchar_t** argv) {
         auto replacementOwner = claim_storage(instanceC, ownerC.instanceUuid, "release");
         {
             RegistryTransaction registry(registryRoot, "release");
-            rejects([&] { registry.delete_instance("03", {}); }, "delete recovery adopted a replacement directory");
-            check(fs::exists(instanceC / "keep") && registry.state().at("defaultId") == "03", "replacement storage and default preserved");
+            rejects([&] { registry.delete_instance("01", {}); }, "delete recovery adopted a replacement directory");
+            check(fs::exists(instanceC / "keep") && registry.state().at("defaultId") == "01", "replacement storage and default preserved");
         }
         delete_storage(replacementOwner, {}, [] {}); // Remove only this isolated replacement fixture.
         {
             RegistryTransaction registry(registryRoot, "release");
-            check(registry.delete_instance("03", {}) && registry.state().at("instances").empty(), "post-removal interrupted journal finalizes without adopting another path");
+            check(registry.delete_instance("01", {}) && registry.state().at("instances").empty(), "post-removal interrupted journal finalizes without adopting another path");
         }
         // Corrupt duplicate keys must be refused, never guessed/reset.
         const auto savedRegistry = registryRoot / "registry.json";

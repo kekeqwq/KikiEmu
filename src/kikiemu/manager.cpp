@@ -140,7 +140,8 @@ std::string execute_management(const Command& command, const ManagerPaths& paths
     if (command.name == "create") return create_instance(command, paths, registry, progress);
     if (command.name == "list") {
         std::ostringstream out; out << "id  system          storage  size  cpu  gpu    mem  status\n";
-        for (const auto& [id, record] : registry.state().at("instances").items()) {
+        for (const auto& id : registry.ordered_ids()) {
+            const auto& record = registry.state().at("instances").at(id);
             auto budget = saved_resources(record);
             out << id << "  kikiaosp_test  " << record.at("owner").at("directory").get<std::string>() << "  "
                 << (record.at("immutableSource").at("layout").at("totalBytes").get<uint64_t>() >> 30) << "g  "

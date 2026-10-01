@@ -13,6 +13,7 @@ public:
     ~RegistryTransaction();
     RegistryTransaction(const RegistryTransaction&) = delete;
     const nlohmann::json& state() const;
+    std::vector<std::string> ordered_ids() const;
     nlohmann::json& instance(const std::string& id);
     void save();
     std::string register_installed(const StorageIdentity& owner, const nlohmann::json& immutableSource,

@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <objbase.h>
 #include "registry.hpp"
+#include <algorithm>
 #include <iomanip>
 #include <set>
 #include <sstream>
@@ -177,15 +178,29 @@ std::string RegistryTransaction::register_installed(const StorageIdentity& owner
         protectedTrees.emplace_back(utf16(other.at("configuration").at("qemu").at("binDirectory").get<std::string>()));
     }
     verify_storage_owner(owner, protectedTrees);
-    const auto number = impl->state.at("nextId").get<uint64_t>();
+    // The transaction holds the registry lock: choose the lowest free ID,
+    // including 01 when empty. Failed/deleting records still reserve theirs.
+    uint64_t number = 1;
+    while (number <= 1000000 && impl->state.at("instances").contains(display_id(number))) ++number;
     if (number > 1000000) throw std::runtime_error("Instance ID space exhausted.");
     const auto id = display_id(number);
     impl->state["instances"][id] = {{"uuid", owner.instanceUuid}, {"owner", storage_identity_json(owner)},
         {"immutableSource", source}, {"configuration", {{"qemu", binding}, {"resources", {
             {"cpus", resources.cpus}, {"memoryBytes", resources.memoryBytes}, {"preset", resources.preset}}}}},
         {"runtime", nullptr}, {"lifecycle", "idle"}, {"deleteJournal", nullptr}, {"lastError", nullptr}};
-    impl->state["nextId"] = number + 1;
+    // Keep the legacy high-water field so existing registries and validation
+    // stay compatible; allocation no longer relies on it.
+    impl->state["nextId"] = std::max(impl->state.at("nextId").get<uint64_t>(), number + 1);
     save(); return id;
+}
+std::vector<std::string> RegistryTransaction::ordered_ids() const {
+    std::vector<std::string> ids;
+    for (const auto& [id, record] : impl->state.at("instances").items()) {
+        (void)record;
+        ids.push_back(id);
+    }
+    std::sort(ids.begin(), ids.end(), [](const auto& a, const auto& b) { return std::stoull(a) < std::stoull(b); });
+    return ids;
 }
 void RegistryTransaction::set_default(const std::string& id) {
     const auto& record = instance(id);
