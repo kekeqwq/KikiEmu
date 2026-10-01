@@ -14,6 +14,23 @@
 namespace kiki {
 using json = nlohmann::json;
 namespace {
+// A session-scoped handshake, not a keyboard/window hook. SDL's close button
+// asks this supervisor to shut Android down; it must never cut guest power.
+class CloseRequest {
+    HANDLE event;
+public:
+    explicit CloseRequest(const std::string& session) {
+        auto name = L"Local\\KikiEmu-close-" + utf16(session);
+        event = CreateEventW(nullptr, TRUE, FALSE, name.c_str());
+        const auto error = GetLastError();
+        if (!event || error == ERROR_ALREADY_EXISTS) {
+            if (event) CloseHandle(event);
+            throw std::runtime_error("Could not create a NEW session close channel.");
+        }
+    }
+    ~CloseRequest() { CloseHandle(event); }
+    bool requested() const { return WaitForSingleObject(event, 0) == WAIT_OBJECT_0; }
+};
 // Brand only windows belonging to this exact supervised QEMU child. QEMU's
 // SDL title comes from KIKI_SDL_WINDOW_TITLE; its executable is not rewritten.
 class QemuWindowIcons {
@@ -145,6 +162,11 @@ bool launcher_display_ready(const std::string& windows, const std::string& layer
     return std::regex_search(windows, focusedHome) &&
         layers.find("com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher") != std::string::npos;
 }
+bool display_power_ready(const std::string& power, const std::string& display) {
+    static const std::regex awake(R"((?:^|\n)[ \t]*mWakefulness=Awake[ \t\r]*(?:\n|$))");
+    static const std::regex screenOn(R"((?:^|\n)[ \t]*mScreenState=ON[ \t\r]*(?:\n|$))");
+    return std::regex_search(power, awake) && std::regex_search(display, screenOn);
+}
 RuntimePlan runtime_plan(const json& record, const ManagerPaths& paths, const std::string& session,
                          uint16_t adb, uint16_t qmp, uint16_t camera) {
     auto owner = parse_storage_identity(record.at("owner"));
@@ -185,7 +207,8 @@ RuntimePlan runtime_plan(const json& record, const ManagerPaths& paths, const st
         L"-device", L"virtconsole,chardev=kiki-logcat,bus=kiki-serial.0,name=org.kikiaosp.logcat",
         L"-chardev", L"socket,id=kiki-camera,host=127.0.0.1,port=" + std::to_wstring(camera) + L",server=on,wait=off",
         L"-device", L"virtserialport,bus=kiki-serial.0,chardev=kiki-camera,name=org.kikiaosp.camera",
-        L"-display", L"sdl,gl=on", L"-qmp", L"tcp:127.0.0.1:" + std::to_wstring(qmp) + L",server=on,wait=off",
+        // Even an older SDL binary must not hard-power-off on its close button.
+        L"-display", L"sdl,gl=on,window-close=off", L"-qmp", L"tcp:127.0.0.1:" + std::to_wstring(qmp) + L",server=on,wait=off",
         L"-serial", L"file:" + (log / "serial.log").wstring(),
         L"-audiodev", L"sdl,id=kiki_audio,out.buffer-length=20000,out.buffer-count=4",
         L"-device", L"virtio-sound-pci,audiodev=kiki_audio,streams=1"};
@@ -193,6 +216,7 @@ RuntimePlan runtime_plan(const json& record, const ManagerPaths& paths, const st
         {L"KIKI_SDL_DISABLE_GRAB", L"1"}, {L"KIKI_SDL_DISABLE_IME", L"1"}, {L"KIKI_SDL_RAW_KEYBOARD_TRACE", L"0"},
         {L"KIKI_SDL_NATIVE_PIXELS", L"1"}, {L"KIKI_SDL_START_WIDTH", L"1003"}, {L"KIKI_SDL_START_HEIGHT", L"1556"},
         {L"KIKI_SDL_WINDOW_TITLE", paths.channel == "release" ? L"KikiEmu" : L"QEMU/Dev"},
+        {L"KIKI_SDL_CLOSE_EVENT", L"Local\\KikiEmu-close-" + utf16(session)},
         {L"KIKI_SDL_BOOT_STATUS", (plan.logDirectory / "boot.ini").wstring()},
         {L"KIKI_SDL_BOOT_EVENTS", (plan.logDirectory / "boot-events.log").wstring()},
         {L"KIKI_SDL_BOOT_SERIAL", (plan.logDirectory / "serial.log").wstring()},
@@ -287,6 +311,7 @@ void supervise_instance(const ManagerPaths& paths, const std::string& id, const 
         verify_installed_disk(record.at("configuration").at("qemu"), owner.directory / "disk", record.at("immutableSource").at("layout"), log / "disk-validation");
         PortReservation adb, qmp, camera;
         auto plan = runtime_plan(record, paths, session, adb.port(), qmp.port(), camera.port());
+        CloseRequest closeRequest(session);
         if (inspect_pe(plan.camera).machine != 0xaa64) throw std::runtime_error("Missing native ARM64 camera bridge.");
         write_status(log, "WAITING", "Booting Android; waiting for its independent ADB transport");
         QemuWindowIcons icons;
@@ -325,11 +350,14 @@ void supervise_instance(const ManagerPaths& paths, const std::string& id, const 
             shell("wm density 288 && settings put system font_scale 1.5 && settings put system min_refresh_rate 120.0 && "
                   "settings put system peak_refresh_rate 120.0");
         }
-        shell("wm dismiss-keyguard && input keyevent 3");
+        // Stay-on is a policy, not proof the screen is awake. Always wake on
+        // subsequent boots too; do not require the user's first tap to do it.
+        shell("input keyevent 224 && wm dismiss-keyguard && input keyevent 3");
         ready = false; deadline = GetTickCount64() + 30000;
         while (qemu.running() && GetTickCount64() < deadline) {
             auto windows = shell("dumpsys window displays"), layers = shell("dumpsys SurfaceFlinger --list"), display = shell("dumpsys display");
-            if (launcher_display_ready(windows, layers, display)) { ready = true; break; }
+            if (launcher_display_ready(windows, layers, display) &&
+                display_power_ready(shell("dumpsys power"), display)) { ready = true; break; }
             Sleep(500);
         }
         if (!ready || shell("dumpsys power").find("mStayOn=true") == std::string::npos || shell("locksettings get-disabled") != "true")
@@ -342,7 +370,27 @@ void supervise_instance(const ManagerPaths& paths, const std::string& id, const 
         update(paths, id, session, [&](json& current) { current["lifecycle"] = "running"; });
         write_status(log, "READY", "System started successfully - opening Android", verified);
         icons.update(qemu.pid());
-        while (qemu.running()) Sleep(250);
+        bool shutdownRequested = false;
+        uint64_t nextShutdownAttempt = 0;
+        while (qemu.running()) {
+            if (closeRequest.requested() && !shutdownRequested && GetTickCount64() >= nextShutdownAttempt) {
+                write_status(log, "SHUTTING_DOWN", "Saving Android data and shutting down; please wait");
+                update(paths, id, session, [&](json& current) { current["lifecycle"] = "stopping"; });
+                try {
+                    // init's orderly shutdown syncs/unmounts guest storage.
+                    auto result = guest_shell(qemuOwner, adbPort, "setprop sys.powerctl shutdown,userrequested", 5000);
+                    if (result.exitCode) throw std::runtime_error(result.error);
+                    shutdownRequested = true;
+                } catch (const std::exception& error) {
+                    // The transport can disappear because shutdown succeeded.
+                    // Otherwise retry without killing the VM or its disk.
+                    std::ofstream output(log / "setup.log", std::ios::app);
+                    output << "Close: " << error.what() << "; retaining guest power and storage.\n";
+                    nextShutdownAttempt = GetTickCount64() + 5000;
+                }
+            }
+            Sleep(250);
+        }
         if (qemu.exit_code()) failure = "QEMU exited with code " + std::to_string(qemu.exit_code()) + ". See qemu.log.";
         // The exact bridge and its camera lease are stopped before storage is
         // released. No host ADB daemon or other QEMU process is touched.

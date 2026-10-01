@@ -68,13 +68,13 @@ void validate(const json& state, const std::string& channel) {
         if (budget.size() != 3 || !cpus || cpus > 64 || !memory || memory > INT64_MAX || memory % (1ULL << 30) ||
             !budget.at("preset").is_string()) throw std::runtime_error("Invalid registered resource configuration.");
         const auto lifecycle = record.at("lifecycle").get<std::string>();
-        if (lifecycle != "idle" && lifecycle != "starting" && lifecycle != "running" &&
+        if (lifecycle != "idle" && lifecycle != "starting" && lifecycle != "running" && lifecycle != "stopping" &&
             lifecycle != "deleting" && lifecycle != "delete-failed") throw std::runtime_error("Unknown lifecycle state.");
         if (!record.at("lastError").is_null() && !record.at("lastError").is_string())
             throw std::runtime_error("Invalid recovery diagnostics.");
         const auto& runtime = record.at("runtime");
         if (runtime.is_null()) {
-            if (lifecycle == "running" || lifecycle == "starting") throw std::runtime_error("Live lifecycle has no owned runtime.");
+            if (lifecycle == "running" || lifecycle == "starting" || lifecycle == "stopping") throw std::runtime_error("Live lifecycle has no owned runtime.");
         } else {
             if (!runtime.is_object() || (runtime.size() != 4 && runtime.size() != 5) || runtime.at("instanceUuid") != owner.instanceUuid ||
                 runtime.at("channel") != channel || !runtime.at("processes").is_array() || !runtime.at("endpoints").is_array())

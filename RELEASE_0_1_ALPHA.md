@@ -2,6 +2,11 @@
 
 Version `0.1.0-alpha`, tag `v0.1.0-alpha`, GitHub **prerelease**.
 
+Publication is currently **on hold**: user acceptance found photo bytes lost
+after SDL window-close/reboot and a black desktop at second-boot handoff.
+Earlier synced-marker/graceful-stop tests did not cover this close-button path.
+Do not publish the current candidate until both regressions pass on real boots.
+
 Download [setup.exe from KikiEmu](https://github.com/kekeqwq/KikiEmu/releases/tag/v0.1.0-alpha)
 and [the system ZIP from kikiaosp_test](https://github.com/kekeqwq/kikiaosp_test/releases/tag/v0.1.0-alpha).
 Read [QUICK_START.md](QUICK_START.md). Build QEMU independently using

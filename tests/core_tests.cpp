@@ -743,9 +743,16 @@ int wmain(int argc, wchar_t** argv) {
         check(plan.arguments.at(7) == L"host" && plan.environment.at(L"KIKI_SDL_DISABLE_GRAB") == L"1" &&
               plan.environment.at(L"KIKI_SDL_START_WIDTH") == L"1003" && plan.environment.at(L"KIKI_SDL_START_HEIGHT") == L"1556",
               "runtime plan keeps validated paired WHPX/native SDL/input/window baseline");
-        check(std::find(plan.arguments.begin(), plan.arguments.end(), L"sdl,gl=on") != plan.arguments.end() &&
+        check(std::find(plan.arguments.begin(), plan.arguments.end(), L"sdl,gl=on,window-close=off") != plan.arguments.end() &&
               std::find(plan.arguments.begin(), plan.arguments.end(), L"-snapshot") == plan.arguments.end(),
               "runtime plan uses native accelerated persistent storage, not snapshots");
+        check(plan.environment.at(L"KIKI_SDL_CLOSE_EVENT").starts_with(L"Local\\KikiEmu-close-"),
+              "SDL close uses a session-scoped supervisor handshake");
+        check(display_power_ready("  mWakefulness=Awake\n", "  mScreenState=ON\n"), "desktop gate requires an awake, ON display");
+        check(!display_power_ready("  mStayOn=true\n  mWakefulness=Asleep\n", "mScreenState=ON\n"),
+              "stay-on policy cannot substitute for actual awake state");
+        check(!display_power_ready("mWakefulness=Awake\n", "mScreenState=OFF\n"), "OFF display must retain boot overlay");
+        check(!display_power_ready("mWakefulness=Awake-ish\n", "mScreenState=ON_PENDING\n"), "malformed power states cannot expose black desktop");
         rejects([&] { runtime_plan(launchFixture, manager, new_instance_uuid(), 5555, 60002, 60003); }, "runtime plan accepted development ADB port");
         rejects([&] { runtime_plan(launchFixture, manager, new_instance_uuid(), 60001, 60001, 60003); }, "runtime plan accepted colliding endpoints");
         auto privateWire = [&](const std::wstring& mode, const std::function<void(const OwnedProcess&, uint16_t)>& operation) {

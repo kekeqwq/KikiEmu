@@ -1,0 +1,79 @@
+diff --git a/ui/sdl2.c b/ui/sdl2.c
+--- a/ui/sdl2.c
++++ b/ui/sdl2.c
+@@ -38,5 +38,6 @@
+ #include "qemu/log.h"
+ #include "qemu-main.h"
++#include "qemu/error-report.h"
+ 
+ #ifdef CONFIG_X11
+ #include <X11/Xlib.h>
+@@ -1077,4 +1078,33 @@
++/* KikiEmu downstream-only: an X click requests Android's orderly shutdown.
++ * Never cut guest power when a registered supervisor owns this SDL session.
++ * No host input hooks or global QEMU/ADB endpoint are involved. */
++static bool kiki_sdl_managed_close(struct sdl2_console *scon)
++{
++#if defined(CONFIG_WIN32)
++    const char *name = g_getenv("KIKI_SDL_CLOSE_EVENT");
++    HANDLE event;
++    g_autofree gunichar2 *wide = NULL;
++    if (!name || !*name) {
++        return false;
++    }
++    wide = g_utf8_to_utf16(name, -1, NULL, NULL, NULL);
++    event = wide ? OpenEventW(EVENT_MODIFY_STATE, FALSE, (WCHAR *)wide) : NULL;
++    if (!event || !SetEvent(event)) {
++        error_report("KikiEmu close channel unavailable; guest power retained");
++    } else if (scon->real_window) {
++        SDL_SetWindowTitle(scon->real_window,
++                           "KikiEmu - saving Android data and shutting down");
++    }
++    if (event) {
++        CloseHandle(event);
++    }
++    return true;
++#else
++    return false;
++#endif
++}
++
+ static void handle_windowevent(SDL_Event *ev)
+ {
+     struct sdl2_console *scon = get_scon_from_window(ev->window.windowID);
+     bool allow_close = true;
+@@ -1129,5 +1159,8 @@
+     case SDL_WINDOWEVENT_CLOSE:
+         if (qemu_console_is_graphic(scon->dcl.con)) {
++            if (kiki_sdl_managed_close(scon)) {
++                break;
++            }
+             if (scon->opts->has_window_close && !scon->opts->window_close) {
+                 allow_close = false;
+             }
+@@ -1206,4 +1239,7 @@
+         case SDL_QUIT:
++            if (kiki_sdl_managed_close(scon)) {
++                break;
++            }
+             if (scon->opts->has_window_close && !scon->opts->window_close) {
+                 allow_close = false;
+             }
+diff --git a/ui/shader.c b/ui/shader.c
+--- a/ui/shader.c
++++ b/ui/shader.c
+@@ -170,5 +170,6 @@
+ void qemu_gl_fini_shader(QemuGLShader *gls)
+ {
++    GLuint vao;
+     if (!gls) {
+         return;
+     }
+@@ -346,5 +347,6 @@
+     glDeleteProgram(gls->texture_blit_prog);
+     glDeleteProgram(gls->texture_blit_flip_prog);
+-    glDeleteProgram(gls->texture_blit_vao);
++    vao = gls->texture_blit_vao;
++    glDeleteVertexArrays(1, &vao);
+     g_free(gls);
+ }

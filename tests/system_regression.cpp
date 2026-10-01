@@ -142,6 +142,38 @@ void verify_guest_identity(const kiki_test::SystemFixture& fixture) {
         "printf '%s\\n%s\\n' \"$(getprop ro.serialno)\" \"$(getprop ro.kikiaosp.build_channel)\"");
     if (identity != expected + "\nrelease\n") throw std::runtime_error("Internal test guest identity mismatch; requested command not executed.");
 }
+struct CloseWindow {
+    OwnedProcess process;
+    unsigned windows = 0;
+    static BOOL CALLBACK visit(HWND window, LPARAM value) {
+        auto& self = *reinterpret_cast<CloseWindow*>(value);
+        DWORD owner = 0; GetWindowThreadProcessId(window, &owner);
+        wchar_t className[128]{}; GetClassNameW(window, className, 128);
+        if (owner != self.process.pid || !IsWindowVisible(window) ||
+            std::wstring(className).find(L"SDL") != 0) return TRUE;
+        if (!owned_process_is_live(self.process) || !PostMessageW(window, WM_CLOSE, 0, 0)) return FALSE;
+        ++self.windows; return TRUE;
+    }
+};
+void close_window(const kiki_test::SystemFixture& fixture) {
+    json record;
+    { RegistryTransaction registry(fixture.manager.registryRoot, "release"); record = registry.instance(fixture.id); }
+    std::optional<OwnedProcess> target;
+    for (const auto& item : record.at("runtime").at("processes")) {
+        auto process = parse_owned_process(item);
+        if (process.role == "qemu") {
+            if (target) throw std::runtime_error("Multiple owned QEMU targets.");
+            target = process;
+        }
+    }
+    if (!target || !owned_process_is_live(*target)) throw std::runtime_error("No verified owned test QEMU.");
+    CloseWindow request{*target}; EnumWindows(CloseWindow::visit, reinterpret_cast<LPARAM>(&request));
+    if (request.windows != 1) throw std::runtime_error("Expected one owned SDL test window; no global window action was taken.");
+    const auto deadline = GetTickCount64() + 60000;
+    while (owned_process_is_live(*target) && GetTickCount64() < deadline) Sleep(100);
+    if (owned_process_is_live(*target)) throw std::runtime_error("SDL close did not finish gracefully; test VM retained, not killed.");
+    std::cout << "Actual owned SDL WM_CLOSE finished; inspect Android shutdown and media hashes.\n";
+}
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -150,7 +182,7 @@ int wmain(int argc, wchar_t** argv) {
             prepare(normalize_directory(argv[2]), normalize_directory(argv[3]), normalize_directory(argv[4]), parse_gib(argv[5])); return 0;
         }
         if ((argc == 3 || argc == 4) && (std::wstring(argv[1]) == L"--boot" || std::wstring(argv[1]) == L"--describe" ||
-             std::wstring(argv[1]) == L"--shutdown" || std::wstring(argv[1]) == L"--shell")) {
+             std::wstring(argv[1]) == L"--shutdown" || std::wstring(argv[1]) == L"--shell" || std::wstring(argv[1]) == L"--close-window")) {
             const auto mode = std::wstring(argv[1]);
             if ((mode == L"--shell") != (argc == 4)) throw std::runtime_error("Internal system-test argument count mismatch.");
             auto root = normalize_directory(argv[2]);
@@ -162,14 +194,15 @@ int wmain(int argc, wchar_t** argv) {
                 std::cout << registry.instance(fixture.id).dump(2) << '\n';
             } else {
                 verify_guest_identity(fixture);
-                std::cout << (mode == L"--shutdown" ? stop_instance(fixture.manager, fixture.id) :
-                              instance_shell(fixture.manager, fixture.id, utf8(argv[3])));
+                if (mode == L"--close-window") close_window(fixture);
+                else std::cout << (mode == L"--shutdown" ? stop_instance(fixture.manager, fixture.id) :
+                                  instance_shell(fixture.manager, fixture.id, utf8(argv[3])));
             }
             return 0;
         }
         std::cerr << "Developer-only REAL-SYSTEM regression. NOT public installer/CLI acceptance.\n"
                   << "  --prepare REAL_ZIP QEMU_BIN NEW_FIXTURE_ROOT TOTAL_GIB\n"
-                  << "  --boot FIXTURE_ROOT\n  --describe FIXTURE_ROOT\n  --shell FIXTURE_ROOT COMMAND\n  --shutdown FIXTURE_ROOT\n"
+                  << "  --boot FIXTURE_ROOT\n  --describe FIXTURE_ROOT\n  --shell FIXTURE_ROOT COMMAND\n  --shutdown FIXTURE_ROOT\n  --close-window FIXTURE_ROOT\n"
                   << "No installed/public instance, user PATH, host ADB daemon or host settings are accessed.\n";
         return 2;
     } catch (const std::exception& error) { std::cerr << "Internal system regression failed: " << error.what() << '\n'; return 1; }

@@ -120,6 +120,11 @@ producer/source-lock/kernel/consumer/QEMU identities and:
    exact disk/block/vold/StorageStats capacity and correct Settings accounting.
 3. A written data marker surviving graceful shutdown and normal reboot without
    formatting established data; no dependency on the original ZIP/staging.
+   Also capture a real photo, hash/decode its JPEG bytes, close the actual SDL
+   window using `--close-window` (WM_CLOSE), then boot again and compare bytes.
+   Do NOT call `sync` first: it masks missing guest shutdown. A retained media
+   database row or filename/size is insufficient. Repeat at least twice and
+   collect a second-boot desktop screenshot before injecting any touch.
 4. Real camera front/back switching, orientation, successful capture and
    camera release; network, audio, touch, external keyboard, Settings/files,
    wallpaper, Launcher/SystemUI and resizing regressions as applicable.
