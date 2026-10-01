@@ -12,6 +12,7 @@
 #include "../src/kikiemu/boot.hpp"
 #include "../src/kikiemu/storage.hpp"
 #include "../src/kikiemu/lifecycle.hpp"
+#include "../src/kikiemu/process_state.hpp"
 #include "../src/kikiemu/registry.hpp"
 #include "../src/kikiemu/package.hpp"
 #include "../src/kikiemu/manager.hpp"
@@ -130,6 +131,32 @@ int wmain(int argc, wchar_t** argv) {
         using namespace kiki;
         if (argc != 1 && !(argc == 3 && std::wstring(argv[1]) == L"--producer-package-fixture"))
             throw std::runtime_error("Unsupported internal test argument.");
+        {
+            using detail::ProcessState;
+            auto state = ProcessState::exited;
+            bool queried = false;
+            check(!detail::verify_live_identity([&] { return state; }, [&] { queried = true; }) && !queried,
+                  "already signaled pinned process is not queried or adopted");
+            state = ProcessState::live;
+            check(detail::verify_live_identity([&] { return state; }, [] {}), "verified live pinned identity remains live");
+            check(!detail::verify_live_identity([&] { return state; }, [&] { state = ProcessState::exited; }),
+                  "exit during identity verification is detected on the same handle");
+            state = ProcessState::live;
+            check(!detail::verify_live_identity([&] { return state; }, [&] {
+                state = ProcessState::exited; throw std::runtime_error("image query raced with exit");
+            }), "failed image query is ignored only after the same pinned object signals exit");
+            state = ProcessState::live;
+            rejects([&] { detail::verify_live_identity([&] { return state; }, [] { throw std::runtime_error("identity mismatch"); }); },
+                    "live identity mismatch incorrectly treated as exit");
+            rejects([&] { detail::verify_live_identity([&] { return state; }, [&] {
+                state = ProcessState::failed; throw std::runtime_error("access denied");
+            }); }, "unknown wait state incorrectly treated as successful exit");
+            rejects([&] { detail::verify_live_identity([&] { return state; }, [] {}); },
+                    "initial wait failure incorrectly accepted");
+            state = ProcessState::live;
+            rejects([&] { detail::verify_live_identity([&] { return state; }, [&] { state = ProcessState::failed; }); },
+                    "post-verification wait failure incorrectly accepted");
+        }
         check(parse_command({}).name == "help", "empty help");
         check(parse_command({L"--list"}).name == "list", "list alias");
         check(add_path_segment(L"C:\\other;", L"C:\\KikiEmu") == L"C:\\other;;C:\\KikiEmu", "append preserves existing empty PATH segment");

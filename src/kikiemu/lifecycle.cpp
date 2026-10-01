@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <iphlpapi.h>
 #include "lifecycle.hpp"
+#include "process_state.hpp"
 #include <algorithm>
 #include <memory>
 #include <set>
@@ -39,6 +40,20 @@ void fields(const OwnedProcess& process) {
         process.executableSha256.size() != 64 ||
         process.executableSha256.find_first_not_of("0123456789abcdef") != std::string::npos)
         throw std::runtime_error("Invalid owned-process record; termination refused.");
+}
+bool verified_live_handle(HANDLE handle, const OwnedProcess& record) {
+    return detail::verify_live_identity([&] {
+        switch (WaitForSingleObject(handle, 0)) {
+        case WAIT_TIMEOUT: return detail::ProcessState::live;
+        case WAIT_OBJECT_0: return detail::ProcessState::exited;
+        default: return detail::ProcessState::failed;
+        }
+    }, [&] {
+        if (created(handle) != record.creationTime ||
+            _wcsicmp(executable(handle).lexically_normal().c_str(), record.executable.lexically_normal().c_str()) ||
+            sha256(record.executable) != record.executableSha256)
+            throw std::runtime_error("Registered live process identity changed (possible PID reuse); operation refused.");
+    });
 }
 } // namespace
 json owned_process_json(const OwnedProcess& process) {
@@ -78,13 +93,7 @@ bool owned_process_is_live(const OwnedProcess& record) {
         if (GetLastError() == ERROR_INVALID_PARAMETER) return false;
         throw std::runtime_error("Could not inspect registered process liveness.");
     }
-    const auto status = WaitForSingleObject(process.value, 0);
-    if (status == WAIT_OBJECT_0) return false;
-    if (status != WAIT_TIMEOUT || created(process.value) != record.creationTime ||
-        _wcsicmp(executable(process.value).lexically_normal().c_str(), record.executable.lexically_normal().c_str()) ||
-        sha256(record.executable) != record.executableSha256)
-        throw std::runtime_error("Registered live process identity changed; operation refused.");
-    return true;
+    return verified_live_handle(process.value, record);
 }
 void verify_owned_endpoints(const std::vector<OwnedProcess>& processes,
                             const std::vector<OwnedEndpoint>& endpoints) {
@@ -135,13 +144,7 @@ void force_stop_owned(const std::string& uuid, const std::string& channel,
             if (GetLastError() == ERROR_INVALID_PARAMETER) continue; // PID no longer exists.
             throw std::runtime_error("Could not inspect the owned process; termination refused.");
         }
-        auto state = WaitForSingleObject(handle->value, 0);
-        if (state == WAIT_OBJECT_0) continue;
-        if (state != WAIT_TIMEOUT) throw std::runtime_error("Could not verify live process state; termination refused.");
-        if (created(handle->value) != record.creationTime ||
-            _wcsicmp(executable(handle->value).lexically_normal().c_str(), record.executable.lexically_normal().c_str()) ||
-            sha256(record.executable) != record.executableSha256)
-            throw std::runtime_error("Live process identity changed (possible PID reuse); termination refused.");
+        if (!verified_live_handle(handle->value, record)) continue;
         pinned.push_back({record.role, std::move(handle)});
     }
     // Suppress an owned supervisor before QEMU so it cannot respawn children.
