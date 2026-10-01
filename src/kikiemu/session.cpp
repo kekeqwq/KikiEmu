@@ -222,7 +222,8 @@ RuntimePlan runtime_plan(const json& record, const ManagerPaths& paths, const st
         {L"KIKI_SDL_BOOT_SERIAL", (plan.logDirectory / "serial.log").wstring()},
         {L"KIKI_SDL_BOOT_LOGCAT", (plan.logDirectory / "logcat.log").wstring()},
         {L"KIKI_SDL_BOOT_SETUP", (plan.logDirectory / "setup.log").wstring()},
-        {L"KIKI_SDL_BOOT_DETAILS", L"KikiAOSP 0.1 Alpha | SDL / VirGL / 120 Hz | " + std::to_wstring(cpus) +
+        {L"KIKI_SDL_BOOT_DETAILS", utf16(record.at("immutableSource").at("manifest").at("buildIdentity").at("displayVersion").get<std::string>()) +
+            L" | SDL / VirGL / 120 Hz | " + std::to_wstring(cpus) +
             L" vCPU / " + std::to_wstring(memoryMiB) + L" MiB | " + utf16(paths.channel)}};
     return plan;
 }

@@ -251,7 +251,7 @@ int wmain(int argc, wchar_t** argv) {
         }
         rejects([] { validate_schema(1, {{"anyOf", nlohmann::json::array()}}); }, "future schema vocabulary silently ignored");
         rejects([] { validate_schema(1, {{"$ref", "https://untrusted.invalid/schema"}}); }, "external schema reference fetched/accepted");
-        check(!version_supported("0.1.0") && version_supported("0.1.0-alpha") && version_supported("0.0.9"), "alpha launcher version ordering");
+        check(!version_supported("0.2.0") && version_supported("0.2.0-alpha") && version_supported("0.1.0-alpha") && version_supported("0.0.9"), "alpha launcher version ordering and 0.1 backward compatibility");
         check(version_supported("0.1.0-alpha.2", "0.1.0-alpha.10"), "numeric prerelease ordering");
         rejects([] { version_supported("0.1.0-alpha.01"); }, "noncanonical numeric prerelease accepted");
         check(sha256_text("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "text SHA-256 known vector");
@@ -683,7 +683,12 @@ int wmain(int argc, wchar_t** argv) {
             {"immutableSource", {{"layout", {{"partitions", nlohmann::json::array({{{"name", "boot"}, {"uuid", new_instance_uuid()}}})}}}}},
             {"configuration", {{"qemu", {{"binDirectory", utf8(fakeBin.wstring())}}},
                 {"resources", {{"cpus", uint32_t(8)}, {"memoryBytes", 4ULL << 30}}}}}};
+        launchFixture["immutableSource"]["manifest"]["buildIdentity"]["displayVersion"] = "KikiAOSP 0.1 Alpha";
         auto plan = runtime_plan(launchFixture, manager, new_instance_uuid(), 60001, 60002, 60003);
+        check(plan.environment.at(L"KIKI_SDL_BOOT_DETAILS").find(L"KikiAOSP 0.1 Alpha |") == 0, "boot overlay preserves installed 0.1 system identity");
+        launchFixture["immutableSource"]["manifest"]["buildIdentity"]["displayVersion"] = "KikiAOSP 0.2 Alpha";
+        auto nextPlan = runtime_plan(launchFixture, manager, new_instance_uuid(), 60001, 60002, 60003);
+        check(nextPlan.environment.at(L"KIKI_SDL_BOOT_DETAILS").find(L"KikiAOSP 0.2 Alpha |") == 0, "boot overlay reads installed system identity rather than launcher version");
         const std::string homeWindow = "  mCurrentFocus=Window{abc123 u0 com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher}\n";
         const auto internalRoot = temp / "internal-system-fixture", internalApp = temp / "internal-app";
         auto rootFixtureOwner = createdOwner; rootFixtureOwner.directory = internalRoot;

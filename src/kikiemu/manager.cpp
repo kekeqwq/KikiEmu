@@ -108,7 +108,7 @@ ManagerPaths user_manager_paths() {
     return {root / "KikiEmu" / "release", fs::path(executable).parent_path(), "release"};
 }
 const char* management_help() {
-    return "KikiEmu 0.1.0-alpha\n"
+    return "KikiEmu 0.2.0-alpha\n"
            "  kikiemu create --system ZIP --storage NEW_FOLDER --size 200g --qemu QEMU_BIN [--performance default|medium|high]\n"
            "  kikiemu list\n"
            "  kikiemu set --default ID\n"
@@ -126,7 +126,7 @@ const char* management_help() {
 }
 std::string execute_management(const Command& command, const ManagerPaths& paths, const Progress& progress) {
     if (command.name == "help") return management_help();
-    if (command.name == "version") return "KikiEmu 0.1.0-alpha (Windows ARM64)\n";
+    if (command.name == "version") return "KikiEmu 0.2.0-alpha (Windows ARM64)\n";
     if (command.name == "doctor") {
         if (!command.options.contains("qemu")) throw std::runtime_error("Use doctor --qemu QEMU_BIN.");
         return prepare_qemu(normalize_directory(command.options.at("qemu")), progress).dump(2) +
