@@ -1,5 +1,14 @@
 # Build QEMU — Windows ARM64
 
+> **0.2 Alpha requires rebuilding QEMU with the revised five-patch recipe.**
+> A 0.1 runtime can still exhibit black-screen/idle-overlay behavior even after
+> updating setup.exe. Use a fresh checkout (for example `~/Repos/QEMU-0.2`),
+> not a mixed 0.1 patch/build cache. The actual 0.2 tested upstream is
+> `f7ada39edacaa5c26b30e98b94017b0b2ccbcf94`; the historical recommendation
+> below could not be fetched during the clean 0.2 rebuild. Patches and the
+> script are available under immutable tag `v0.2.0-alpha`.
+> Follow the exact update commands in [0.2 release notes](RELEASE_0_2_ALPHA.md).
+
 QEMU, KikiEmu's `setup.exe`, and the KikiAOSP system ZIP are independent.
 **Do not clone KikiEmu to build QEMU.** You only need Git, PowerShell 7 and
 an updated [MSYS2](https://www.msys2.org/) installation on Windows ARM64.

@@ -8,6 +8,10 @@
 | [kikiaosp_kernel](https://github.com/kekeqwq/kikiaosp_kernel) | Linux 7.3-rc4 4 KiB 内核与 Nix 构建 |
 | 本仓库 | Windows ARM64 QEMU 补丁及构建、摄像头桥接、开发镜像收集/启动/测试；终端用户配置管理器、系统安装器与桌面启动入口 |
 
+## 0.2 Alpha
+
+**本次需要同步更新 setup.exe 和 QEMU 五补丁构建，再用新系统 ZIP 新建实例。** 已有实例不会自动升级系统或内核。下载、准确构建来源、编号复用规则与验收边界见 [0.2 Alpha 发布说明](RELEASE_0_2_ALPHA.md)。0.1 标签和附件保持不变。
+
 ## 0.1 Alpha 与后续开发
 
 终端用户下载 [KikiEmu 0.1 Alpha 的 setup.exe](https://github.com/kekeqwq/KikiEmu/releases/tag/v0.1.0-alpha) 和 [KikiAOSP 0.1 Alpha 系统 ZIP](https://github.com/kekeqwq/kikiaosp_test/releases/tag/v0.1.0-alpha)，先看 [英文使用说明](QUICK_START.md)。QEMU 独立按 [构建说明](QEMU_BUILD.md) 编译，KikiEmu 自动检查并准备 bin 内缺少的运行依赖，用户无需运行 prepare.ps1。版本范围、源码／许可材料和已知限制见 [0.1 Alpha 记录](RELEASE_0_1_ALPHA.md)，此前 R8 过程保留在 [候选记录](CANDIDATE_TEST_20261001.md)。不要使用下面历史 bundle 的启动命令初始化发行实例。
@@ -39,7 +43,7 @@ adb -s $serial shell
 
 Android 与内核在 `192.168.2.185` 的干净版本分支上开发。Windows 使用 [五补丁构建配方](QEMU_BUILD.md) 和 [独立系统回归入口](tests/SYSTEM_REGRESSION.md)，不使用下方历史 bundle、固定端口或旧 `.sh` 配方重建当前版本。
 
-0.2 Alpha 目标仅为二次启动黑屏修复及 Linux 7.3-rc5 升级；目前尚未完成复现、修复或实机验证。系统变更只推进 KikiAOSP Release；仅当启动器确需修改时才同步推进 KikiEmu/setup.exe。已发布 0.1 标签及附件不覆盖，不开展性能优化。
+0.2 Alpha 完成二次启动黑屏／空闲遮罩交接修补、Linux 7.3-rc5 升级，并修正启动器系统版本显示和编号复用。因启动器也发生修改，两边均发布0.2；发版仍按实际改动分别推进，不要求以后同步版本。已发布 0.1 标签及附件不覆盖，不开展性能优化。
 
 ## 历史开发回溯主线：2026-09-30
 

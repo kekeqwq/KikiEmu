@@ -63,6 +63,7 @@
 !/tools/relink_launcher.ps1
 !/tools/publish_alpha_release.ps1
 !/RELEASE_0_1_ALPHA.md
+!/RELEASE_0_2_ALPHA.md
 !/tools/build_kikiemu_icon.ps1
 !/tools/check_gpt_guest_storage.ps1
 !/tools/export_qemu_runtime.ps1
