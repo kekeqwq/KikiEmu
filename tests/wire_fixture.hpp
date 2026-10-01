@@ -54,8 +54,13 @@ inline int serve(uint16_t port, const std::wstring& mode, const kiki::fs::path& 
             auto hello = read(peer);
             if (hello.command != cnxn || hello.a != 0x01000000 || !hello.payload.starts_with("host::features=shell_v2;")) return 23;
             std::string banner = "device::ro.product.name=kikiaosp_test;features=shell_v2;"; banner += '\0';
-            write(peer, cnxn, 0x01000000, 65536, banner, mode == L"corrupt");
-            if (mode != L"corrupt") {
+            const bool rejectedGreeting = mode == L"corrupt" || mode == L"modern-corrupt" ||
+                mode == L"unknown-version" || mode == L"auth";
+            const uint32_t version = mode == L"unknown-version" ? 0x01000002 :
+                (mode == L"modern-version" || mode == L"modern-corrupt" ? 0x01000001 : 0x01000000);
+            write(peer, mode == L"auth" ? 0x48545541 : cnxn, version, 65536, banner,
+                  mode == L"corrupt" || mode == L"modern-corrupt");
+            if (!rejectedGreeting) {
                 auto request = read(peer);
                 if (request.command != open || request.a != 1 || request.b != 0 || request.payload != std::string("shell,v2,raw:echo fixture") + '\0') return 24;
                 write(peer, okay, 7, 1, {});
@@ -75,7 +80,7 @@ inline int serve(uint16_t port, const std::wstring& mode, const kiki::fs::path& 
     } catch (...) {
         if (peer != INVALID_SOCKET) closesocket(peer); if (listener != INVALID_SOCKET) closesocket(listener); WSACleanup();
         // Negative cases deliberately disconnect after rejecting the peer.
-        return mode == L"success" ? 27 : 0;
+        return mode == L"success" || mode == L"modern-version" ? 27 : 0;
     }
 }
 } // namespace wire_fixture

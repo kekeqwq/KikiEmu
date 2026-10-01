@@ -111,7 +111,14 @@ ShellResult guest_shell(const OwnedProcess& qemu, uint16_t port, const std::stri
     std::string banner = "host::features=shell_v2;"; banner += '\0';
     send_packet(socket.value, deadline, CNXN, 0x01000000, 256 * 1024, banner);
     auto hello = read_packet(socket.value, deadline);
-    if (hello.command != CNXN || hello.a != 0x01000000 || hello.b < 4096 || !hello.payload.starts_with("device::"))
+    // AOSP send_connect advertises its maximum version, not the negotiated
+    // minimum. Android 17 replies 0x01000001 to our 0x01000000 greeting.
+    // Keep advertising the original version: min(peer, host) stays 0x01000000
+    // and ALL packets still require checksums. Do not infer skip-checksum from
+    // the peer's maximum, accept AUTH/TLS, or accept unknown protocol versions.
+    // https://android.googlesource.com/platform/packages/modules/adb/+/HEAD/adb.cpp
+    if (hello.command != CNXN || (hello.a != 0x01000000 && hello.a != 0x01000001) ||
+        hello.b < 4096 || !hello.payload.starts_with("device::"))
         throw std::runtime_error("Unsupported/secure ADB transport; expected this product's private debug adbd.");
     std::string service = "shell,v2,raw:" + command; service += '\0'; send_packet(socket.value, deadline, OPEN, 1, 0, service);
     auto opened = read_packet(socket.value, deadline);

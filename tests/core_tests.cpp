@@ -675,7 +675,8 @@ int wmain(int argc, wchar_t** argv) {
                 while (!fs::exists(ready) && child.running() && GetTickCount64() < until) Sleep(10);
                 check(fs::exists(ready), "exact owned fake adbd ready");
                 operation(identity, port);
-                if (mode == L"success") check(child.wait(5000) && child.exit_code() == 0, "fake adbd validates complete wire handshake and acknowledgement");
+                if (mode == L"success" || mode == L"modern-version")
+                    check(child.wait(5000) && child.exit_code() == 0, "fake adbd validates complete wire handshake and acknowledgement");
             }
             fs::remove(log); fs::remove(ready);
         };
@@ -684,7 +685,12 @@ int wmain(int argc, wchar_t** argv) {
             check(result.output == "fixture\n" && result.error == "warning\n" && result.exitCode == 7,
                   "private ADB handles fragmented/coalesced shell-v2 stdout stderr and exit status");
         });
-        for (const auto& mode : {L"corrupt", L"foreign-stream", L"no-exit", L"timeout"})
+        privateWire(L"modern-version", [&](const OwnedProcess& process, uint16_t port) {
+            auto result = guest_shell(process, port, "echo fixture");
+            check(result.output == "fixture\n" && result.error == "warning\n" && result.exitCode == 7,
+                  "modern adbd maximum version negotiates legacy checksummed shell-v2 without a global server");
+        });
+        for (const auto& mode : {L"corrupt", L"modern-corrupt", L"unknown-version", L"auth", L"foreign-stream", L"no-exit", L"timeout"})
             privateWire(mode, [&](const OwnedProcess& process, uint16_t port) {
                 rejects([&] { guest_shell(process, port, "echo fixture", 200); }, "invalid/foreign/incomplete/stalled ADB stream accepted");
             });
