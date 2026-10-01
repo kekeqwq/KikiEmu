@@ -107,7 +107,7 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH
 git clone https://gitlab.com/qemu-project/qemu.git ~/Repos/qemu
 if ($LASTEXITCODE -ne 0) { throw 'QEMU clone failed.' }
 cd ~/Repos/qemu
-Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/aa1ba7763ccf2d85e7aa01764c7be468fbe05396/build.ps1' -OutFile ./build.ps1
+Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/2b4fe858b5bde615275949001ee6d0433cb76fa7/build.ps1' -OutFile ./build.ps1
 ./build.ps1 --msys2 'C:\msys64'
 ```
 
