@@ -88,19 +88,51 @@ function Invoke-KikiBuildProcess {
         if ($null -eq $Environment[$name]) { [void]$start.Environment.Remove($name) }
         else { $start.Environment[$name] = $Environment[$name] }
     }
-    if ($Capture) {
-        $start.RedirectStandardOutput = $true
-        $start.RedirectStandardError = $true
-        $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
-        $start.StandardErrorEncoding = [Text.UTF8Encoding]::new($false)
-    }
+    # A hidden Windows child must not rely on inherited console handles.
+    # Always supply real pipes, then either capture or forward their output.
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    $start.StandardErrorEncoding = [Text.UTF8Encoding]::new($false)
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $start
     try {
         [void]$process.Start()
+        $process.StandardInput.Close() # Explicit EOF; every build command is noninteractive.
         if ($Capture) {
             $stdout = $process.StandardOutput.ReadToEndAsync()
             $stderr = $process.StandardError.ReadToEndAsync()
+        } else {
+            $stdoutLine = $process.StandardOutput.ReadLineAsync()
+            $stderrLine = $process.StandardError.ReadLineAsync()
+            $tail = [Collections.Generic.Queue[string]]::new()
+            # Drain both pipes concurrently so a full stderr/stdout pipe never
+            # deadlocks Ninja or Python. Forward lines while the child runs,
+            # not only after a potentially hours-long compilation completes.
+            while ($null -ne $stdoutLine -or $null -ne $stderrLine) {
+                $pending = [Threading.Tasks.Task[]]@(@($stdoutLine, $stderrLine) | Where-Object { $null -ne $_ })
+                [void][Threading.Tasks.Task]::WaitAny($pending, 100)
+                if ($null -ne $stdoutLine -and $stdoutLine.IsCompleted) {
+                    $line = $stdoutLine.GetAwaiter().GetResult()
+                    if ($null -eq $line) { $stdoutLine = $null }
+                    else {
+                        Write-Host $line
+                        $tail.Enqueue($line)
+                        $stdoutLine = $process.StandardOutput.ReadLineAsync()
+                    }
+                }
+                if ($null -ne $stderrLine -and $stderrLine.IsCompleted) {
+                    $line = $stderrLine.GetAwaiter().GetResult()
+                    if ($null -eq $line) { $stderrLine = $null }
+                    else {
+                        Write-Host $line
+                        $tail.Enqueue($line)
+                        $stderrLine = $process.StandardError.ReadLineAsync()
+                    }
+                }
+                while ($tail.Count -gt 80) { [void]$tail.Dequeue() }
+            }
         }
         $process.WaitForExit()
         if ($Capture) {
@@ -109,7 +141,7 @@ function Invoke-KikiBuildProcess {
         }
         if ($process.ExitCode -ne 0) {
             if ($Capture) { throw "Command failed ($($process.ExitCode)): $Executable`n$errorText$output" }
-            throw "Command failed ($($process.ExitCode)): $Executable. Review the build output above."
+            throw "Command failed ($($process.ExitCode)): $Executable`nLast build output:`n$($tail -join "`n")"
         }
         if ($Capture) { return $output.TrimEnd([char[]]"`r`n") }
     } finally { $process.Dispose() }

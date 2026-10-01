@@ -38,6 +38,8 @@ installs only missing dependencies, verifies and applies the four fixed patches,
 then builds native ARM64 QEMU with WHPX, SDL, GTK, OpenGL, VirGL and slirp.
 It uses the supplied MSYS2's CLANGARM64 tools, never WSL. QEMU's shell-based
 configure is called internally; there is no separate user `.sh` step.
+Build stdout and stderr are displayed live; failures include the last diagnostic
+lines rather than only a child-process exit code.
 
 ## Output
 
@@ -55,6 +57,12 @@ The receipt records your actual HEAD; use a new checkout if changing revisions
 after patching rather than reusing stale patch/build state.
 It does **not** copy/export DLLs or ROMs, move/package output, install KikiEmu,
 modify persistent host settings, or start QEMU. Actual build testing is yours.
+
+The corrected script was tested locally on upstream HEAD
+`f7ada39edacaa5c26b30e98b94017b0b2ccbcf94`: native ARM64 configuration passed
+and Ninja started real C compilation. At the user's request the build was
+stopped with intermediates retained. Full compilation and runtime acceptance
+are still user-owned tests, not claimed as completed by this check.
 
 The launcher currently requires the three EXEs, their adjacent private DLLs
 and `roms/`. This build-only script intentionally does not arrange deployment;

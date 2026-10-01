@@ -74,6 +74,32 @@ foreach ($patch in $recipe.Patches) {
 }
 Check ((Get-KikiTextHash ($recipe | ConvertTo-Json -Depth 8 -Compress)) -eq 'd0c7ffab1ec9ca8525aac148c2e437dc3cf9916294f33c7a35af8a64202e9247') 'deterministic ordered recipe hash'
 
+# Exercise a real hidden child with pipes, without installing/building/running
+# QEMU. PowerShell script-block callbacks on async event threads are avoided.
+$pwsh = (Get-Process -Id $PID).Path
+$streamed = @(Invoke-KikiBuildProcess $pwsh @('-NoProfile', '-NonInteractive', '-Command',
+    '[Console]::Out.WriteLine("stdout-marker"); [Console]::Error.WriteLine("stderr-marker"); if ($null -eq [Console]::In.ReadLine()) { [Console]::Out.WriteLine("stdin-eof") }') 6>&1)
+$streamText = ($streamed | ForEach-Object { $_.ToString() }) -join "`n"
+Check ($streamText -like '*stdout-marker*') 'streamed child stdout is visible'
+Check ($streamText -like '*stderr-marker*') 'streamed child stderr is visible'
+Check ($streamText -like '*stdin-eof*') 'hidden child receives valid stdin EOF'
+$captured = Invoke-KikiBuildProcess $pwsh @('-NoProfile', '-NonInteractive', '-Command',
+    '[Console]::Out.WriteLine("captured-marker")') -Capture
+Check ($captured -eq 'captured-marker') 'capture mode still returns only stdout'
+Reject { Invoke-KikiBuildProcess $pwsh @('-NoProfile', '-NonInteractive', '-Command',
+    '[Console]::Error.WriteLine("specific-child-error"); exit 7') 6>$null } 'specific-child-error' 'streamed failure includes real stderr'
+Reject { Invoke-KikiBuildProcess $pwsh @('-NoProfile', '-NonInteractive', '-Command',
+    '[Console]::Error.WriteLine("captured-child-error"); exit 9') -Capture } 'captured-child-error' 'captured failure includes real stderr'
+$burst = @(Invoke-KikiBuildProcess $pwsh @('-NoProfile', '-NonInteractive', '-Command',
+    'for ($i = 0; $i -lt 1600; $i++) { [Console]::Error.WriteLine("stderr-burst-{0:D4}:" + ("x" * 100), $i) }; [Console]::Out.WriteLine("burst-complete")') 6>&1)
+Check ((($burst | ForEach-Object { $_.ToString() }) -join "`n") -like '*burst-complete*') 'large stderr pipe drains without deadlock'
+$script:liveFirstLine = $false
+$script:liveClock = [Diagnostics.Stopwatch]::StartNew()
+Invoke-KikiBuildProcess $pwsh @('-NoProfile', '-NonInteractive', '-Command',
+    '[Console]::Out.WriteLine("live-before-wait"); [Threading.Thread]::Sleep(1800); [Console]::Out.WriteLine("live-after-wait")') 6>&1 |
+    ForEach-Object { if ($_.ToString() -eq 'live-before-wait') { $script:liveFirstLine = $script:liveClock.ElapsedMilliseconds -lt 1600 } }
+Check $script:liveFirstLine 'output arrives before child completion'
+
 $git = (Get-Command git.exe -CommandType Application).Source
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('kiki-qemu-script-tests-' + [Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($scratch)

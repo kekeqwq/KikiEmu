@@ -117,6 +117,8 @@ Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/aa1ba7763cc
 
 产物直接留在 **QEMU 源码目录的 `bin`**，重复运行同一命令可增量构建。脚本仅处理依赖、补丁和构建，不移动、导出、清理或启动产物，不更改宿主的持久配置。实际构建交由用户先行测试；DLL/ROM 部署暂不加入脚本。独立英文说明见 [QEMU_BUILD.md](QEMU_BUILD.md)。上面历史开发流程中的 `.sh` 和内部导出工具不属于这个用户流程。
 
+构建标准输出和错误输出实时显示，失败会附带最后的诊断信息。新版入口已在用户的 QEMU master `f7ada39e` 上通过原生 ARM64 配置并进入真实 C 编译，按用户要求中止并保留增量产物；不宣称完整构建或运行验证已完成。
+
 0.1 的模块边界：KikiEmu 只做配置管理、系统安装和按配置启动；KikiAOSP ZIP 只包含系统必需文件及配套内核；QEMU 由用户独立构建/提供。以下接口已包含在R8候选安装器中，等待用户安装／公开CLI验收：
 
 ```powershell
