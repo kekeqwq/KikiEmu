@@ -68,7 +68,9 @@ m -j8 systemimage vendorimage
 
 当前 CP2A 将 product/system_ext 内容打进 system 镜像。启动配对仍保留两个兼容辅助磁盘；不可拿旧磁盘上的 WallpaperPicker2 冒充当前实际运行的 ThemePicker。
 
-## 2. Windows ARM64 构建 QEMU 和摄像头桥接
+## 2. 历史开发回溯：Windows ARM64 构建 QEMU 和摄像头桥接
+
+本节的 `.sh`/`tools` 配方仅供本仓库旧开发基线回溯，**不是终端用户流程**。终端用户直接使用下节的独立 PowerShell 入口，无需克隆本仓库。
 
 安装 MSYS2，在 **CLANGARM64** 终端更新并准备依赖（不是 UCRT64/x86_64）：
 
@@ -99,12 +101,26 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH
 
 ### 发行版使用用户指定的 QEMU
 
-独立英文逐步说明见 [QEMU_BUILD.md](QEMU_BUILD.md)：从指定候选提交、新装MSYS2依赖到四份补丁构建、私有bin导出及用户 `--qemu` 配置。不要从旧开发main/旧EXE猜测发行运行库。
+终端用户不需要克隆 KikiEmu，也不需要 `kikiemu/tools` 目录。准备好 Windows ARM64、Git、PowerShell 7 和 MSYS2 后，在 PowerShell 中只做以下步骤（目录可自行选择，QEMU 源码路径不要含空格）：
+
+```powershell
+git clone https://gitlab.com/qemu-project/qemu.git ~/Repos/qemu
+if ($LASTEXITCODE -ne 0) { throw 'QEMU clone failed.' }
+cd ~/Repos/qemu
+git checkout --detach bde658eef6b38c45794bfd7ad4d2dd1b574e4694
+if ($LASTEXITCODE -ne 0) { throw 'QEMU checkout failed.' }
+Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/feat/release-0_1-alpha/build.ps1' -OutFile ./build.ps1
+./build.ps1 --msys2 'C:\msys64'
+```
+
+已经克隆 QEMU 则从 `cd` 开始；把 MSYS2 路径改成自己的安装路径，例如 `C:\msys2`。脚本检查已安装包，只安装缺失依赖，校验并应用固定四份补丁，再开始构建。默认并行度8，支持 `-Jobs 4`；也接受 PowerShell 风格的 `-Msys2`。
+
+产物直接留在 **QEMU 源码目录的 `bin`**，重复运行同一命令可增量构建。脚本仅处理依赖、补丁和构建，不移动、导出、清理或启动产物，不更改宿主的持久配置。实际构建交由用户先行测试；DLL/ROM 部署暂不加入脚本。独立英文说明见 [QEMU_BUILD.md](QEMU_BUILD.md)。上面历史开发流程中的 `.sh` 和内部导出工具不属于这个用户流程。
 
 0.1 的模块边界：KikiEmu 只做配置管理、系统安装和按配置启动；KikiAOSP ZIP 只包含系统必需文件及配套内核；QEMU 由用户独立构建/提供。以下接口已包含在R8候选安装器中，等待用户安装／公开CLI验收：
 
 ```powershell
-kikiemu create --system ~/Downloads/KikiAOSP-0.1.0-alpha-arm64.zip --storage ~/MyAndroid --size 200g --qemu ~/Tools/KikiQemu/bin
+kikiemu create --system ~/Downloads/KikiAOSP-0.1.0-alpha-arm64.zip --storage ~/MyAndroid --size 200g --qemu ~/Repos/qemu/bin
 kikiemu set --id 01 --qemu ~/Tools/KikiQemu-v2/bin
 kikiemu --delete --force --id 01
 ```
@@ -113,26 +129,9 @@ kikiemu --delete --force --id 01
 
 删除接口为 `kikiemu --delete --force --id 01`，也接受 `kikiemu delete --force --id 01`。它不再询问确认：核验目标实例和 storage 所有权后，终止仅属于该实例的 QEMU/配套进程，永久删除其 storage 文件夹及全部数据；若为默认实例，同时清除默认设置。必须显式提供 ID 和 `--force`，不允许传入任意删除路径；路径/实例/进程身份不符时拒绝，不会清理其他实例、原始 ZIP 或用户提供的 QEMU。卸载启动器仍默认保留用户系统数据。完整事务与安全约束见 [发行规划](RELEASE_PLAN.md#explicit-destructive-instance-deletion)。该接口已包含在编译好的候选 setup.exe 中；精确所属进程终止、运行中 storage lease 删除、默认注销及失败恢复通过内部检查，公开 CLI/delete 的用户验收仍待完成。
 
-从上面 CLANGARM64 环境按仓库固定提交/补丁构建到新的目录，避免覆盖已经绑定给正式实例的运行库：
+用户提供的运行目录需要满足上述 DLL/ROM 检查；新 `build.ps1` 按本次约定只保留原始构建产物，不预先增加导出步骤。如果 `create` 报缺少 DLL 或 `roms/`，保留产物与错误信息再决定下一步，不用旧文件冒充。已有完整运行目录的测试证据见候选记录，不代表新脚本构建已经验收。
 
-```bash
-./tools/build_qemu_arm64.sh "$PWD/tools/qemu-release-0_1-src"
-# 同时构建 qemu-system-aarch64.exe、qemu-img.exe、qemu-io.exe。
-```
-
-在 PowerShell 7 构建原生的内部目录检查工具，并导出一个独立运行目录（路径含空格时保留引号）：
-
-```powershell
-# MSYS2 CLANGARM64 开发依赖；在该终端用 pacman 安装：
-# pacman -S --needed mingw-w64-clang-aarch64-nlohmann-json
-$env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH  # 仅当前开发终端，不是安装器改 PATH
-.\tools\build_kikiemu_core.ps1
-.\tools\export_qemu_runtime.ps1 -BuildDirectory .\tools\qemu-release-0_1-src\build -OutputBin "$HOME\Tools\KikiQemu\bin"
-```
-
-导出器只接受新目录，收集本次构建的 ARM64 EXE、静态导入的 DLL 依赖链和 ROM，记录哈希，并检查导出结果不再依赖 MSYS2 DLL 目录。`DependencyBin` 只是**构建导出输入**，不是用户启动时的 fallback。目录检查不启动虚拟机，也不安装程序、改注册表或修改用户实例。
-
-当前检查工具是内部开发工具，不是用户验收入口；静态补丁标记/PE/DLL 检查不能代替 GPT 启动 ABI、动态加载模块、宿主 OpenGL/Mesa D3D12 → Adreno 和完整系统实测。发行配方现已额外应用 [通道标题补丁](patches/qemu-sdl-channel-title.patch)：正式版设置 `KIKI_SDL_WINDOW_TITLE=KikiEmu`，无该环境变量时保留开发标题行为。配置管理器要求这个编译能力标记，所以必须在**新目录**按当前四份补丁完整构建、导出，不要把旧开发 EXE 直接绑定为发行运行库。最新目录检查和实际干净系统启动已通过，测试字节与范围见候选记录；不代表其他设备／驱动已经认证。
+发行配方包含 [通道标题补丁](patches/qemu-sdl-channel-title.patch)：正式版设置 `KIKI_SDL_WINDOW_TITLE=KikiEmu`，无该环境变量时保留开发标题行为。配置管理器要求这个编译能力标记，所以新入口固定应用全部四份补丁，不能用旧开发 EXE 代替。静态检查不能代替完整系统启动或宿主 GPU 兼容性实测。
 
 发行启动将只使用实例保存的规范化 QEMU 路径及已验证文件身份；缺失、不兼容或文件变化时给出英文错误，不搜索 PATH、不回退到旧开发 EXE、不自动换成软件渲染。正式和 Dev 使用独立 bin/output 目录。KikiEmu 卸载不删除用户提供的 QEMU 或用户磁盘。
 

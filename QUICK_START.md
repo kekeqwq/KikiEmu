@@ -14,10 +14,10 @@ Requires Windows 11 ARM64 with Windows Hypervisor Platform, a compatible host
 OpenGL/VirGL path, and adequate free storage and host memory. The accepted test
 hardware is the Snapdragon Surface. Other hardware has not been certified.
 WHPX and a real system boot are required; byte/architecture checks alone cannot
-prove GPU or driver compatibility. See the repository README for the exact
-native MSYS2 CLANGARM64 QEMU build/export recipe and prerequisites. The
-self-contained [QEMU build guide](QEMU_BUILD.md) includes the exact frozen
-candidate checkout, dependency packages and all four required patches.
+prove GPU or driver compatibility. [Build QEMU independently](QEMU_BUILD.md):
+clone only upstream QEMU, enter it, download `build.ps1`, and run it with your
+MSYS2 path. No KikiEmu clone is required. Original output stays in QEMU's
+`bin`; DLL/ROM deployment is not performed by the build-only script.
 
 ## Install and initialize
 
@@ -26,7 +26,7 @@ Run setup.exe. It installs for the current user, without elevation, in
 and creates Start Menu/desktop entries. Open a **new** PowerShell window:
 
 ```powershell
-kikiemu create --system ~/Downloads/KikiAOSP-0.1.0-alpha-arm64.zip --storage ~/MyAndroid --size 200g --qemu ~/Tools/KikiQemu/bin
+kikiemu create --system ~/Downloads/KikiAOSP-0.1.0-alpha-arm64.zip --storage ~/MyAndroid --size 200g --qemu ~/Repos/qemu/bin
 kikiemu list
 kikiemu set --default 01
 ```

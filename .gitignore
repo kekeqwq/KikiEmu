@@ -19,6 +19,7 @@
 !/QUICK_START.md
 !/CANDIDATE_TEST_20261001.md
 !/QEMU_BUILD.md
+!/build.ps1
 !/installer/
 !/installer/**
 !/src/

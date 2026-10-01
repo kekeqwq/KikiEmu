@@ -161,10 +161,12 @@ recorded above; the two fixtures and native candidates are not interchangeable.
 
 - [User guide](QUICK_START.md): create/list/default, resource/QEMU settings,
   start, scoped ADB, explicit force-delete and uninstall semantics.
-- [QEMU build guide](QEMU_BUILD.md): the exact frozen candidate checkout,
-  native MSYS2 packages, four patches and independent bin export.
-- [README](README.md): the native MSYS2 CLANGARM64 QEMU build/export recipe,
-  exact upstream revision, four release patches and required dependencies.
+- [QEMU build guide](QEMU_BUILD.md): upstream QEMU only, pinned revision,
+  standalone PowerShell download, MSYS2 package checks and four fixed patches.
+  This new build-only entry leaves output in the checkout's bin; its actual
+  user build test and any runtime deployment follow-up are still pending.
+- [README](README.md): the same standalone Windows build workflow; no KikiEmu
+  clone or internal inspector is required by an end user.
 - [Installer build](INSTALLER.md): clean native receipts and setup assembly.
 - [System regression](tests/SYSTEM_REGRESSION.md): real-system test boundaries
   and required evidence.

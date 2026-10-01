@@ -1,125 +1,66 @@
-# Build the compatible QEMU runtime — Windows ARM64
+# Build QEMU — Windows ARM64
 
-QEMU is user-provided. KikiEmu's setup installs the manager, desktop entry and
-camera bridge; it does **not** include QEMU or an Android disk. The independent
-KikiAOSP ZIP contains the kernel and system payloads, not QEMU.
+QEMU, KikiEmu's `setup.exe`, and the KikiAOSP system ZIP are independent.
+**Do not clone KikiEmu to build QEMU.** You only need Git, PowerShell 7 and
+an updated [MSYS2](https://www.msys2.org/) installation on Windows ARM64.
 
-These instructions describe the current 0.1 Alpha **candidate**, not a
-published/accepted release. Use a separate checkout/build/bin directory for
-development; never overwrite a runtime already configured for an instance.
+## Clone QEMU, download the script, build
 
-## 1. Obtain the matching source
-
-In the MSYS2 **CLANGARM64** terminal on native Windows ARM64:
-
-```bash
-git clone --branch feat/release-0_1-alpha https://github.com/kekeqwq/KikiEmu.git KikiEmu-alpha
-cd KikiEmu-alpha
-git checkout --detach 2130e523573d3304a3fa05b3c88e5dca79ff3ff5
-```
-
-The candidate source is frozen here; default `main` still represents the
-accepted development baseline, not this candidate's manager/runtime contract.
-Once an accepted immutable release tag exists, use its documented source
-instead. Do not guess a newer upstream QEMU revision or omit a patch.
-
-## 2. Install native build dependencies
-
-Update MSYS2 with `pacman -Syu`, reopen the terminal if requested, and complete
-the update before building. Use CLANGARM64, **not** UCRT64/x86_64 or WSL:
-
-```bash
-pacman -S --needed git make ninja python pkgconf \
-  mingw-w64-clang-aarch64-clang mingw-w64-clang-aarch64-pkgconf \
-  mingw-w64-clang-aarch64-glib2 mingw-w64-clang-aarch64-gtk3 \
-  mingw-w64-clang-aarch64-SDL2 mingw-w64-clang-aarch64-libslirp \
-  mingw-w64-clang-aarch64-pixman mingw-w64-clang-aarch64-zstd \
-  mingw-w64-clang-aarch64-libepoxy mingw-w64-clang-aarch64-virglrenderer \
-  mingw-w64-clang-aarch64-nlohmann-json mingw-w64-clang-aarch64-libarchive \
-  mingw-w64-clang-aarch64-expat mingw-w64-clang-aarch64-cppwinrt
-```
-
-The JSON/libarchive/expat dependencies are also needed by the native internal
-export inspector. Native QEMU/system testing requires Windows Hypervisor
-Platform and the host's compatible hardware OpenGL path. VirGL's protocol
-library is **not** an Adreno graphics driver. This Surface's tested path is
-Mesa D3D12 to the Qualcomm GPU; the scripts do not install/change that driver
-or host display settings. Other GPUs/PCs have not been certified.
-
-## 3. Build all three QEMU tools
-
-```bash
-KIKI_BOOT_CONSOLE=1 KIKI_BUILD_JOBS=8 \
-  ./tools/build_qemu_arm64.sh "$PWD/tools/qemu-alpha-user-src"
-```
-
-The script obtains official upstream QEMU and pins
-`bde658eef6b38c45794bfd7ad4d2dd1b574e4694`. It checks the source tree is clean,
-then applies these tracked patches **in order**:
-
-1. `patches/qemu-kikiaosp-tested-surface-20260929.patch`
-2. `patches/qemu-io-binary-source.patch`
-3. `patches/qemu-sdl-boot-console.patch`
-4. `patches/qemu-sdl-channel-title.patch`
-
-The configure recipe explicitly enables native AArch64, WHPX, SDL, OpenGL,
-VirGL and slirp. It builds `qemu-system-aarch64.exe`, `qemu-img.exe` and
-`qemu-io.exe`. Re-running the initial patching script on its already patched
-tree is intentionally refused. For an unchanged patched tree, incrementally
-rebuild with:
-
-```bash
-ninja -C tools/qemu-alpha-user-src/build -j8 \
-  qemu-system-aarch64.exe qemu-img.exe qemu-io.exe
-```
-
-Do not start a bare WHPX/GPU probe on this Surface. Test through the complete
-paired kernel/system/SDL recipe after initialization, not an empty QEMU guest.
-
-## 4. Export a private bin directory
-
-Use PowerShell 7 at the same checkout. The PATH assignment below affects this
-build terminal only; it is not a persistent host PATH edit:
+Run in **PowerShell 7**. The checkout location is yours to choose; upstream
+QEMU requires a source/build path without spaces. `~/Repos/qemu` is an example.
 
 ```powershell
-$env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH
-./tools/build_kikiemu_core.ps1 -RunUnitTests
-./tools/export_qemu_runtime.ps1 `
-  -BuildDirectory ./tools/qemu-alpha-user-src/build `
-  -OutputBin "$HOME/Tools/KikiQemu-alpha/bin" `
-  -InspectorPath ./build/kikiemu-core/kikiemu-runtime-inspect.exe
+git clone https://gitlab.com/qemu-project/qemu.git ~/Repos/qemu
+if ($LASTEXITCODE -ne 0) { throw 'QEMU clone failed.' }
+cd ~/Repos/qemu
+git checkout --detach bde658eef6b38c45794bfd7ad4d2dd1b574e4694
+if ($LASTEXITCODE -ne 0) { throw 'QEMU checkout failed.' }
+
+Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/feat/release-0_1-alpha/build.ps1' -OutFile ./build.ps1
+./build.ps1 --msys2 'C:\msys64'
 ```
 
-`OutputBin` must be new. The internal inspector/exporter does not install
-KikiEmu or execute its public CLI. It collects native QEMU executables, the
-static imported DLL closure and `roms/`, records hashes and validates that the
-result does not depend on the developer's MSYS2 DLL search directory.
+Already cloned? Start at `cd`, using your own checkout path. Replace
+`C:\msys64` with your MSYS2 installation, for example `C:\msys2`.
+`-Msys2` also works; parallelism defaults to 8 and can be changed with `-Jobs 4`.
 
-Keep the **entire** exported directory together. A copied EXE alone is not a
-usable runtime. Byte/architecture/compiled-marker checks do not certify
-WHPX, dynamically loaded host modules or hardware GPU compatibility; a real
-complete system boot is still required.
+The script checks installed packages, skips installation when none are missing,
+installs only missing dependencies, verifies and applies the four fixed patches,
+then builds native ARM64 QEMU with WHPX, SDL, GTK, OpenGL, VirGL and slirp.
+It uses the supplied MSYS2's CLANGARM64 tools, never WSL. QEMU's shell-based
+configure is called internally; there is no separate user `.sh` step.
 
-## 5. Configure the installed manager
+## Output
 
-After the user installs the matching setup.exe, open a new PowerShell:
+The original build output stays directly in **`<QEMU source>/bin`**:
+
+- `qemu-system-aarch64.exe`
+- `qemu-img.exe`
+- `qemu-io.exe`
+- Normal QEMU/Meson/Ninja intermediate files.
+
+Rerun the same command for an incremental build. Verified patches and a build
+receipt stay in `.kiki-qemu-build/`. The script refuses unrelated source changes
+or an unmanaged nonempty `bin`; it does not reset source or clean old files.
+It does **not** copy/export DLLs or ROMs, move/package output, install KikiEmu,
+modify persistent host settings, or start QEMU. Actual build testing is yours.
+
+The launcher currently requires the three EXEs, their adjacent private DLLs
+and `roms/`. This build-only script intentionally does not arrange deployment;
+if those checks fail, keep the output and report the error for the next step.
+Do not substitute an old runtime. Once compatible, select your directory:
 
 ```powershell
-kikiemu create --system ~/Downloads/KikiAOSP-0.1.0-alpha-arm64.zip --storage ~/MyAndroid --size 200g --qemu ~/Tools/KikiQemu-alpha/bin
-kikiemu set --default 01
+kikiemu create --system ~/Downloads/KikiAOSP-0.1.0-alpha-arm64.zip --storage ~/MyAndroid --size 200g --qemu ~/Repos/qemu/bin
+kikiemu set --id 01 --qemu D:/MyQemu/bin
 ```
 
-200g is only an example of immutable total GiB. QEMU's bin directory is a
-required explicit binding; start revalidates its saved file identities and
-does not fall back to PATH or an older developer QEMU. The tested 0.1 defaults
-are 8 vCPU / 4 GiB, SDL/VirGL, 120-Hz guest rendering and 1003×1556 native pixels.
+No fixed directory layout is required. Do not rebuild an in-use runtime.
+If MSYS2 needs an update, complete `pacman -Syu` in its terminal before retrying;
+the build script does not perform a whole-installation upgrade. Patch source is
+fixed at `2130e523573d3304a3fa05b3c88e5dca79ff3ff5` and each SHA-256 is checked.
+Host GPU drivers/WHPX setup are outside this script; other PCs are not certified.
 
-To select a separately built/exported compatible runtime for the next boot:
-
-```powershell
-kikiemu set --id 01 --qemu ~/Tools/KikiQemu-next/bin
-```
-
-Do not modify an in-use runtime in place. QEMU rebuilding/rebinding is not an
-Android reinstall or a disk resize. See [QUICK_START.md](QUICK_START.md) for
-management, scoped ADB, force-delete and uninstall behavior.
+References: [QEMU build system](https://www.qemu.org/docs/master/devel/build-system.html),
+[MSYS2 environments](https://www.msys2.org/docs/environments/),
+[MSYS2 packages](https://www.msys2.org/docs/package-management/).
