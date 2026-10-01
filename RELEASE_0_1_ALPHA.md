@@ -2,8 +2,9 @@
 
 Version `0.1.0-alpha`, tag `v0.1.0-alpha`, GitHub **prerelease**.
 
-Publication is currently **on hold pending updated user acceptance**. Earlier
-synced-marker/graceful-stop tests did not cover the SDL close-button path.
+Publication was explicitly authorized on 2026-10-01 after the managed-close
+system regression. Earlier synced-marker/graceful-stop tests did not cover
+the SDL close-button path.
 The managed-close fix has now passed three real boots, two photo/reboot cycles
 without manual sync, byte-identical/decodeable JPEGs, and untouched-screen
 desktop handoff. Users must update BOTH launcher and patched QEMU; the earlier
@@ -71,17 +72,22 @@ assets' `release-provenance.json` and `SHA256SUMS.txt`.
 
 ## Verification scope
 
-321 native ARM64 internal checks passed, including home paths, separators,
+326 native ARM64 internal checks passed, including home paths, separators,
 progress, rollback/ownership and automatic runtime preparation. Actual selected
 QEMU EXE copies from upstream `f7ada39edacaa5c26b30e98b94017b0b2ccbcf94`
-with the four recorded patches required49DLLs/43ROMs; preparation preserved
-all EXE hashes and the second pass made no changes. No bare WHPX/GPU probe ran.
+with the earlier four-patch recipe required49DLLs/43ROMs; preparation preserved
+all EXE hashes and the second pass made no changes. The final five-patch build
+script passed 56 checks including immutable remote patch hashes. No bare
+WHPX/GPU probe ran.
 
 The real clean ZIP previously booted fresh32/200-GiB instances and preserved
 data over graceful restart;200GiB also rebooted with its source ZIP unavailable.
 This manager update additionally booted a fresh32-GiB owned internal instance
 with Android17, Linux7.3.0-rc4-4k, VirGL GLES3.1,120Hz,1003x1556/288dpi and
-Launcher HOME readiness. Physical2880x1920 Windows screenshots were inspected
+Launcher HOME readiness. Three boots and two real SDL close-button/reboot
+cycles preserved all three camera JPEGs without manual sync; hashes matched
+and independent decoding succeeded. The second and third boots displayed HOME
+without guest input. Physical2880x1920 Windows screenshots were inspected
 after READY, not during the transient boot black screen. Internal runner,
 fixtures, initialized disks and screenshots are NOT release payloads.
 

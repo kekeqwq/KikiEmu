@@ -58,6 +58,14 @@ start the configured default with the native boot logo/logs, then Android.
 No initialization/default or an incompatible runtime produces an English
 error dialog; the launcher never silently selects another system or QEMU.
 
+Closing the Android window requests a normal Android shutdown. Wait for the
+window to disappear while data is saved; do not kill QEMU or power off Windows.
+The final Alpha requires the five-patch QEMU recipe in [QEMU_BUILD.md](QEMU_BUILD.md),
+including managed window-close. If updating an earlier test candidate, rebuild
+QEMU, install the new setup and revalidate with `kikiemu set --id 01 --qemu PATH`.
+Existing disks need not be recreated. Photos already reduced to zero-filled
+files by an earlier candidate cannot be restored by this update.
+
 Creation can take several minutes while validating and reading back the disk.
 Wait for `Created id NN`; do not start a second creation into the same folder.
 If creation is interrupted before registration, keep that folder for diagnosis
