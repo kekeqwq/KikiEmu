@@ -64,10 +64,42 @@ and Ninja started real C compilation. At the user's request the build was
 stopped with intermediates retained. Full compilation and runtime acceptance
 are still user-owned tests, not claimed as completed by this check.
 
-The launcher currently requires the three EXEs, their adjacent private DLLs
-and `roms/`. This build-only script intentionally does not arrange deployment;
-if those checks fail, keep the output and report the error for the next step.
-Do not substitute an old runtime. Once compatible, select your directory:
+## Prepare the runtime (separate from building)
+
+After the build completes, remain in the **same QEMU checkout root** and run:
+
+```powershell
+Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/feat/release-0_1-alpha/prepare.ps1' -OutFile ./prepare.ps1
+./prepare.ps1 --msys2 'C:\msys64'
+```
+
+This standalone script does not require a KikiEmu checkout. It reads the three
+compiled EXEs with CLANGARM64's `llvm-readobj`, recursively checks their normal
+and delay-loaded imports for native ARM64, and copies only missing private DLLs
+from your **matching MSYS2 installation** into `bin`. Windows system DLLs are
+not copied. It also copies matching binary ROM files from this checkout's
+`pc-bios` into `bin/roms`. Do not uninstall/update the build's dependencies
+between compilation and preparation.
+
+It never recompiles, launches QEMU, replaces EXEs, moves output, installs
+packages or changes PATH/host settings. Existing identical files are skipped;
+conflicting files cause an error, not an overwrite or cleanup. Close any
+process using that QEMU bin first. Use a new bin/build for another version;
+never copy old QEMU EXEs or unrelated DLLs to bypass an error. Repeating the
+command with the same sources is safe. Optional `-BinDirectory 'D:\Qemu\bin'`
+(or `--bin`) prepares another directory already containing the three matching
+EXEs; it does not export those EXEs for you.
+
+This resolves `QEMU bin is missing a private DLL: zlib1.dll` after a successful
+build; copying just zlib is insufficient because imports are recursive. The
+user's completed `f7ada39e` build was checked **using isolated EXE copies**:
+49 private DLLs and 43 ROMs were prepared, then the launcher's native runtime
+validator passed without a fallback dependency path. All three EXE hashes
+were unchanged. This is static runtime validation, not a new boot/GPU test;
+the user's original bin was not modified during these checks.
+
+The launcher requires the three EXEs, adjacent private DLLs and `roms/`.
+Once prepared, select your own directory:
 
 ```powershell
 kikiemu create --system ~/Downloads/KikiAOSP-0.1.0-alpha-arm64.zip --storage ~/MyAndroid --size 200g --qemu ~/Repos/qemu/bin
@@ -82,4 +114,5 @@ Host GPU drivers/WHPX setup are outside this script; other PCs are not certified
 
 References: [QEMU build system](https://www.qemu.org/docs/master/devel/build-system.html),
 [MSYS2 environments](https://www.msys2.org/docs/environments/),
-[MSYS2 packages](https://www.msys2.org/docs/package-management/).
+[MSYS2 packages](https://www.msys2.org/docs/package-management/),
+[LLVM object reader](https://llvm.org/docs/CommandGuide/llvm-readobj.html).

@@ -163,8 +163,11 @@ recorded above; the two fixtures and native candidates are not interchangeable.
   start, scoped ADB, explicit force-delete and uninstall semantics.
 - [QEMU build guide](QEMU_BUILD.md): upstream QEMU only, recommended verified revision,
   standalone PowerShell download, MSYS2 package checks and four fixed patches.
-  This new build-only entry leaves output in the checkout's bin; its actual
-  user build test and any runtime deployment follow-up are still pending.
+  The build-only entry leaves output in the checkout's bin. A separate
+  standalone `prepare.ps1` adds missing private DLLs/ROMs, not EXEs. The user's
+  completed `f7ada39e` EXEs passed static validation in an isolated copy after
+  49 DLLs/43 ROMs were prepared; no original bin or system disk was changed.
+  A real system boot/GPU test with this user-built runtime remains pending.
 - [README](README.md): the same standalone Windows build workflow; no KikiEmu
   clone or internal inspector is required by an end user.
 - [Installer build](INSTALLER.md): clean native receipts and setup assembly.

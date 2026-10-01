@@ -115,9 +115,18 @@ Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/2b4fe858b5b
 
 建议但不强制使用已验证的 QEMU 提交 `bde658eef6b38c45794bfd7ad4d2dd1b574e4694`，需要时在构建前自行执行 `git checkout --detach bde658eef6b38c45794bfd7ad4d2dd1b574e4694`。其他提交只输出兼容性警告，仍会继续尝试补丁和构建，可能失败；脚本不会替用户切换或锁定提交。增量记录保存实际 HEAD，打过补丁后若换版本则使用新 checkout，不复用旧补丁／构建状态。
 
-产物直接留在 **QEMU 源码目录的 `bin`**，重复运行同一命令可增量构建。脚本仅处理依赖、补丁和构建，不移动、导出、清理或启动产物，不更改宿主的持久配置。实际构建交由用户先行测试；DLL/ROM 部署暂不加入脚本。独立英文说明见 [QEMU_BUILD.md](QEMU_BUILD.md)。上面历史开发流程中的 `.sh` 和内部导出工具不属于这个用户流程。
+产物直接留在 **QEMU 源码目录的 `bin`**，重复运行同一命令可增量构建。`build.ps1` 仅处理依赖、补丁和构建，不移动、导出、清理或启动产物，不更改宿主的持久配置。DLL/ROM 部署使用下一步独立入口，绝不混入构建脚本。独立英文说明见 [QEMU_BUILD.md](QEMU_BUILD.md)。上面历史开发流程中的 `.sh` 和内部导出工具不属于这个用户流程。
 
 构建标准输出和错误输出实时显示，失败会附带最后的诊断信息。新版入口已在用户的 QEMU master `f7ada39e` 上通过原生 ARM64 配置并进入真实 C 编译，按用户要求中止并保留增量产物；不宣称完整构建或运行验证已完成。
+
+用户完成构建后，保持在同一份 QEMU 源码根目录，另行下载并运行独立依赖准备脚本：
+
+```powershell
+Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/feat/release-0_1-alpha/prepare.ps1' -OutFile ./prepare.ps1
+./prepare.ps1 --msys2 'C:\msys64'
+```
+
+`prepare.ps1` 用该 MSYS2 的 CLANGARM64 工具静态检查三个 EXE 的原生 ARM64 递归依赖，只把缺少的私有 DLL 和该 QEMU 源码配套的 ROM 复制到 `bin`／`bin/roms`；不重新编译、不替换 EXE、不启动系统、不安装包、不修改宿主配置。已存在且相同的文件跳过，冲突文件报错而不覆盖。准备时关闭使用该 bin 的进程，并保留编译时配套的 MSYS2 库版本。无需克隆 KikiEmu 或编译内部检查器。
 
 0.1 的模块边界：KikiEmu 只做配置管理、系统安装和按配置启动；KikiAOSP ZIP 只包含系统必需文件及配套内核；QEMU 由用户独立构建/提供。以下接口已包含在R8候选安装器中，等待用户安装／公开CLI验收：
 
@@ -131,7 +140,7 @@ kikiemu --delete --force --id 01
 
 删除接口为 `kikiemu --delete --force --id 01`，也接受 `kikiemu delete --force --id 01`。它不再询问确认：核验目标实例和 storage 所有权后，终止仅属于该实例的 QEMU/配套进程，永久删除其 storage 文件夹及全部数据；若为默认实例，同时清除默认设置。必须显式提供 ID 和 `--force`，不允许传入任意删除路径；路径/实例/进程身份不符时拒绝，不会清理其他实例、原始 ZIP 或用户提供的 QEMU。卸载启动器仍默认保留用户系统数据。完整事务与安全约束见 [发行规划](RELEASE_PLAN.md#explicit-destructive-instance-deletion)。该接口已包含在编译好的候选 setup.exe 中；精确所属进程终止、运行中 storage lease 删除、默认注销及失败恢复通过内部检查，公开 CLI/delete 的用户验收仍待完成。
 
-用户提供的运行目录需要满足上述 DLL/ROM 检查；新 `build.ps1` 按本次约定只保留原始构建产物，不预先增加导出步骤。如果 `create` 报缺少 DLL 或 `roms/`，保留产物与错误信息再决定下一步，不用旧文件冒充。已有完整运行目录的测试证据见候选记录，不代表新脚本构建已经验收。
+用户提供的运行目录需要满足上述 DLL/ROM 检查；`create` 报缺少 `zlib1.dll` 时，使用上述独立 `prepare.ps1` 补齐整个依赖闭包，不要只复制一个 DLL 或用旧文件冒充。已在用户完成的 `f7ada39e` 三个 EXE 的隔离副本上补齐49个 DLL、43个 ROM，并通过启动器的静态验证，三个 EXE 哈希不变；用户的原始 bin 未被这次测试修改。此前完整运行目录的系统证据见候选记录，新的静态验证不代表这份用户构建已完成系统启动／GPU 验收。
 
 发行配方包含 [通道标题补丁](patches/qemu-sdl-channel-title.patch)：正式版设置 `KIKI_SDL_WINDOW_TITLE=KikiEmu`，无该环境变量时保留开发标题行为。配置管理器要求这个编译能力标记，所以新入口固定应用全部四份补丁，不能用旧开发 EXE 代替。静态检查不能代替完整系统启动或宿主 GPU 兼容性实测。
 

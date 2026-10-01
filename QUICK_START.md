@@ -17,7 +17,10 @@ WHPX and a real system boot are required; byte/architecture checks alone cannot
 prove GPU or driver compatibility. [Build QEMU independently](QEMU_BUILD.md):
 clone only upstream QEMU, enter it, download `build.ps1`, and run it with your
 MSYS2 path. No KikiEmu clone is required. Original output stays in QEMU's
-`bin`; DLL/ROM deployment is not performed by the build-only script.
+`bin`; DLL/ROM deployment is not performed by the build-only script. After
+compiling, download and run the separate `prepare.ps1` from the same QEMU
+checkout, as described in that guide. It adds missing private DLLs/ROMs without
+recompiling or replacing EXEs. Then pass that complete bin to `create`.
 
 ## Install and initialize
 
