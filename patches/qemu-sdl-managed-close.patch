@@ -77,3 +77,20 @@ diff --git a/ui/shader.c b/ui/shader.c
 +    glDeleteVertexArrays(1, &vao);
      g_free(gls);
  }
+diff --git a/ui/sdl2-gl.c b/ui/sdl2-gl.c
+--- a/ui/sdl2-gl.c
++++ b/ui/sdl2-gl.c
+@@ -265,7 +265,12 @@
+     if (scon->updates && scon->real_window) {
+         scon->updates = 0;
+-        sdl2_gl_render_surface(scon);
++        /* Updates can accumulate while the boot console owns presentation.
++         * In VirGL scanout mode the software surface is only a placeholder;
++         * presenting it after handoff overwrites an idle HOME with black.
++         * Redraw the authoritative scanout, just like SDL expose events do.
++         */
++        sdl2_gl_redraw(scon);
+     }
+     sdl2_poll_events(scon);
+ }
+ 
