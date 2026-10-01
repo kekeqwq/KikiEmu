@@ -328,7 +328,17 @@ void supervise_instance(const ManagerPaths& paths, const std::string& id, const 
         auto cameraOwner = describe_owned_process(bridge.pid(), plan.camera, owner.instanceUuid, paths.channel, "camera");
         update(paths, id, session, [&](json& current) { current["runtime"]["processes"].push_back(owned_process_json(cameraOwner)); }); bridge.resume();
         auto shell = [&](const std::string& command) {
-            auto result = guest_shell(qemuOwner, adbPort, command, 5000);
+            // Cold first-boot Settings/locksettings and dumpsys calls can
+            // exceed five seconds even after sys.boot_completed is set.
+            // Keep the cheap readiness probe short; configuration is bounded
+            // by the same 30-second allowance as explicit instance commands.
+            ShellResult result;
+            try {
+                result = guest_shell(qemuOwner, adbPort, command,
+                    command == "getprop sys.boot_completed" ? 5000 : 30000);
+            } catch (const std::exception& error) {
+                throw std::runtime_error("Android command transport failed: " + command + ": " + error.what());
+            }
             if (result.exitCode) throw std::runtime_error("Android command failed: " + command + ": " + result.error);
             return trim(result.output);
         };
