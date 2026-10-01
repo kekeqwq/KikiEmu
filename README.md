@@ -125,6 +125,8 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH  # 仅当前开发终端，�
 
 原生组件构建依赖 MSYS2 CLANGARM64 的 clang、windres、nlohmann-json、libarchive、expat 及其依赖；运行 `tools/build_kikiemu_core.ps1 -RunUnitTests`。共享核心编译一次供两个产品入口和四个内部工具复用；产品入口嵌入原图标、版本、非提权和 DPI/长路径 manifest。libarchive/expat 静态链接；MSYS2 的 libarchive 仍导入 zlib，构建脚本将原生 `zlib1.dll` 私有复制在 EXE 旁，不依赖用户 MSYS2/PATH。相机桥接单独由 `tools/build_surface_camera_bridge.ps1` 构建，使用 Windows 官方 OneCore 导入库和静态 C++ runtime；只在实际打开相机时持有跨实例占用锁，关闭相机后释放。最终发行必须补齐静态/动态依赖的原许可和源码义务审计。
 
+候选打包现在要求 core/相机各自的完成构建凭据：冻结 Git 提交、追踪输入哈希、干净状态、编译器与产物身份、core 内部检查记录；没有凭据、版本不符、失败构建残留、dirty source 或替换过的 EXE 均拒绝。自身源码继续 GPL-2.0-or-later，组合 manager/desktop 二进制选择 GPLv3（包含 Apache-2.0 OpenSSL），不统一重标第三方，详见 [许可选择与待完成的源码义务](LICENSE_NOTICE.md)。这不是已完成全部第三方合规审计的声明。
+
 开发侧新增 [干净包真实系统测试入口与证据清单](tests/SYSTEM_REGRESSION.md)：`kikiemu-system-regression.exe` 只在新建、独立所有权的内部目录读取真正的发行 ZIP，复用生产 reader/磁盘/supervisor/private ADB 完整配方，支持实际系统启动、限定 shell、正常关机和持久化复测，不调用公开 CLI/desktop，不触碰用户安装的 registry/PATH。该工具不进 setup.exe；编译或内部 fixture 检查通过不等于实际系统启动成功，更不冒充用户安装器验收。
 
 32 GiB 原型磁盘启动前约占1.16 GiB；GPT、boot/system/vendor 逐块读回校验及 QCOW2 检查通过，没有 backing file 或旧 userdata。首次系统启动发现上游 init 的 boot UUID 分类漏掉 virtio-blk，已在设备仓库追踪最小修补并重建。修正后单盘实际启动进入 SDL/VirGL/120Hz 桌面，剩余容量首次格式化为 F2FS，跨正常关机/重启的数据标记保持不变。

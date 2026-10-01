@@ -10,6 +10,10 @@
 !/BOOT_CONSOLE.md
 !/RELEASE_PLAN.md
 !/LICENSE
+!/LICENSE_NOTICE.md
+!/LICENSES/
+/LICENSES/*
+!/LICENSES/GPL-3.0.txt
 !/LICENSING.md
 !/INSTALLER.md
 !/QUICK_START.md
@@ -48,6 +52,7 @@
 /tools/*
 !/tools/build_qemu_arm64.sh
 !/tools/build_kikiemu_core.ps1
+!/tools/build_receipt.ps1
 !/tools/build_kikiemu_setup.ps1
 !/tools/build_kikiemu_icon.ps1
 !/tools/check_gpt_guest_storage.ps1

@@ -2,6 +2,7 @@
 param([string]$OutputDirectory = 'build/kikiemu-core', [switch]$RunUnitTests, [string]$ProducerFixture)
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+. (Join-Path $PSScriptRoot 'build_receipt.ps1')
 $compiler = (Get-Command clang++ -ErrorAction Stop).Source
 if ((& $compiler -dumpmachine).Trim() -ne 'aarch64-w64-windows-gnu') {
     throw 'Use the native MSYS2 CLANGARM64 compiler, not x86_64 or MSYS clang.'
@@ -12,6 +13,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $prefix 'include/nlohmann/json.hpp')
 }
 if (-not [IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory = Join-Path $repoRoot $OutputDirectory }
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
+$receiptPath = Join-Path $OutputDirectory 'core-build-receipt.json'
+Initialize-KikiBuildReceipt -Path $receiptPath -Kind 'kikiemu-core'
+$sourceInputs = @((Get-ChildItem -LiteralPath (Join-Path $repoRoot 'src/kikiemu') -File -Recurse).FullName)
+$sourceInputs += @('tests/core_tests.cpp', 'tests/wire_fixture.hpp', 'tests/system_fixture.hpp', 'tests/system_regression.cpp',
+    'tools/build_kikiemu_core.ps1', 'tools/build_receipt.ps1', 'assets/kikiemu.ico') | ForEach-Object { Join-Path $repoRoot $_ }
+$snapshot = Get-KikiBuildSnapshot -RepoRoot $repoRoot -SourceFiles $sourceInputs
 foreach ($library in @('libarchive.a', 'libexpat.a')) {
     if (-not (Test-Path -LiteralPath (Join-Path $prefix "lib/$library"))) { throw "Missing native static dependency: $library" }
 }
@@ -85,3 +92,6 @@ if ($RunUnitTests) {
     else { & $tests }
     if ($LASTEXITCODE -ne 0) { throw 'Core unit tests failed.' }
 }
+Complete-KikiBuildReceipt -RepoRoot $repoRoot -Snapshot $snapshot -Compiler $compiler -Kind 'kikiemu-core' -Path $receiptPath `
+    -OutputFiles @($cli, $desktop, $setupHelper, (Join-Path $OutputDirectory 'zlib1.dll')) `
+    -UnitTests $(if ($RunUnitTests) { 'passed' } else { 'not-run' })

@@ -28,6 +28,18 @@ licenses, verifies ARM64 imports, and records source/payload/setup hashes.
 Internal tests, synthetic ZIPs, QEMU, Android images/disks and developer logs
 are not installer payloads.
 
+The core and camera builders invalidate old build receipts before changing
+output bytes. They record their exact source revision, tracked source hashes,
+clean/dirty state, compiler identity and output hashes only after completion.
+The core receipt also records whether internal checks passed. Packaging
+requires BOTH completed clean receipts at the exact packaging revision,
+successful core checks and unchanged native output bytes. A missing/stale,
+dirty, interrupted, different-revision or modified-binary receipt refuses
+before creating a candidate payload. Receipt tests use only new inert text
+fixtures (`tests/build_receipt_tests.ps1`), never installer/public CLI calls.
+These receipts prevent accidental build mixing; they are not signatures or
+a security boundary against a user deliberately forging all records.
+
 NSIS filename warning 9000 is explicitly acknowledged for the user's required
 `setup.exe` name: Windows may apply filename-based compatibility shims. Only
 this warning is exempted; all others fail the build. The installer requires
@@ -57,5 +69,9 @@ There is no automatic update or implicit disk migration in 0.1.
 Binary redistribution still requires the matching corresponding source/build
 inputs and full third-party license audit. Self-authored source is
 GPL-2.0-or-later, not a relicensing of AOSP, Windows APIs or dependencies.
+The combined manager/desktop binaries select GPLv3 because their static
+closure includes Apache-2.0 OpenSSL; see [LICENSE_NOTICE.md](LICENSE_NOTICE.md)
+and the complete [GPLv3 terms](LICENSES/GPL-3.0.txt). The installer presents
+these selected terms and retains GPLv2/source and dependency notices too.
 Candidate compilation is not approval to publish an incomplete license/source
 set. Real user installer acceptance and clean system acceptance remain gates.

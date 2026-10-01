@@ -5,6 +5,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+. (Join-Path $PSScriptRoot 'build_receipt.ps1')
 $sourcePath = Join-Path $PSScriptRoot 'surface_camera_bridge.cpp'
 $winrtSourcePath = Join-Path $PSScriptRoot 'surface_camera_winrt.cpp'
 
@@ -30,6 +31,12 @@ if (-not [System.IO.Path]::IsPathRooted($OutputPath)) {
 }
 $outputDirectory = Split-Path -Parent $OutputPath
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
+$receiptPath = $OutputPath + '.build-receipt.json'
+Initialize-KikiBuildReceipt -Path $receiptPath -Kind 'surface-camera'
+$sourceInputs = @($sourcePath, $winrtSourcePath, (Join-Path $PSScriptRoot 'surface_camera_winrt.h'), (Join-Path $PSScriptRoot 'build_surface_camera_bridge.ps1'),
+    (Join-Path $PSScriptRoot 'build_receipt.ps1'))
+$sourceInputs += @((Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'surface_camera*.hpp' -File).FullName)
+$snapshot = Get-KikiBuildSnapshot -RepoRoot $repoRoot -SourceFiles $sourceInputs
 
 & $compiler -std=c++20 -O2 -Wall -Wextra -Wno-unused-parameter -static `
     $sourcePath $winrtSourcePath -o $OutputPath `
@@ -49,3 +56,4 @@ if ($ProbeRealCameras) {
     & $OutputPath --switch-test 3
     if ($LASTEXITCODE -ne 0) { throw 'Sequential front/rear switching test failed.' }
 }
+Complete-KikiBuildReceipt -RepoRoot $repoRoot -Snapshot $snapshot -Compiler $compiler -Kind 'surface-camera' -Path $receiptPath -OutputFiles @($OutputPath)

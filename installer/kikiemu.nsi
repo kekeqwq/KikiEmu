@@ -33,7 +33,7 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "KikiEmu contributors"
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TEXT "Install the native Windows ARM64 KikiEmu CLI and desktop entry for this user.$\r$\n$\r$\nSystem packages and your own compatible QEMU runtime are separate downloads/builds. No Android disk or QEMU is installed by setup.$\r$\n$\r$\nClose KikiEmu instances before updating. Uninstall keeps all system instances and data."
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "${PAYLOAD}\LICENSE"
+!insertmacro MUI_PAGE_LICENSE "${PAYLOAD}\licenses\project\GPL-3.0.txt"
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_TEXT "KikiEmu has been installed.$\r$\n$\r$\nOpen a NEW PowerShell window and follow QUICK_START.md to create an instance with its own system ZIP, storage, total size and QEMU bin directory.$\r$\n$\r$\nThe desktop entry starts only the instance you explicitly set as default."
 !insertmacro MUI_PAGE_FINISH
@@ -107,6 +107,7 @@ Section "Install"
   File "${PAYLOAD}\zlib1.dll"
   File "${PAYLOAD}\kikiemu.ico"
   File "${PAYLOAD}\LICENSE"
+  File "${PAYLOAD}\LICENSE_NOTICE.md"
   File "${PAYLOAD}\QUICK_START.md"
   SetOutPath "$INSTDIR\licenses"
   File /r "${PAYLOAD}\licenses\*"
@@ -150,6 +151,7 @@ Section "Uninstall"
   Delete "$INSTDIR\zlib1.dll"
   Delete "$INSTDIR\kikiemu.ico"
   Delete "$INSTDIR\LICENSE"
+  Delete "$INSTDIR\LICENSE_NOTICE.md"
   Delete "$INSTDIR\QUICK_START.md"
   ; Only compiler-enumerated installer-owned license paths; never RMDir /r.
   !include "${PAYLOAD}\uninstall-licenses.nsh"
