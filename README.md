@@ -109,7 +109,7 @@ if ($LASTEXITCODE -ne 0) { throw 'QEMU clone failed.' }
 cd ~/Repos/qemu
 git checkout --detach bde658eef6b38c45794bfd7ad4d2dd1b574e4694
 if ($LASTEXITCODE -ne 0) { throw 'QEMU checkout failed.' }
-Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/feat/release-0_1-alpha/build.ps1' -OutFile ./build.ps1
+Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/d614f2df791174d90943eaf02a3f3ca4a4d0e30a/build.ps1' -OutFile ./build.ps1
 ./build.ps1 --msys2 'C:\msys64'
 ```
 
