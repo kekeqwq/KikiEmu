@@ -58,6 +58,7 @@ function Get-KikiQemuRecipe {
             [ordered]@{ Name = 'qemu-io-binary-source.patch'; Sha256 = 'c99af88556a20ca7ba5da102fdd7b5a5b08ea41a26992dcc61fc5f72b0252357' }
             [ordered]@{ Name = 'qemu-sdl-boot-console.patch'; Sha256 = '681600b5b06baeb823242e1bb4c3a3358ee50db2dc84dca5392b915049420d3b' }
             [ordered]@{ Name = 'qemu-sdl-channel-title.patch'; Sha256 = 'ad41ebace69e5c6132312c9b41fc1710846ccd7ec4f0478badf53924a8b93239' }
+            [ordered]@{ Name = 'qemu-sdl-managed-close.patch'; Sha256 = 'af3387a34b6e0835e3dbc08474775ce6786725fb1247b30bd104f45e49ebf5e5'; Revision = '5efce132869321c864f74ccf2a8e92538e7b4a43' }
         )
         Packages = @(
             'git', 'make', 'ninja',
@@ -235,11 +236,17 @@ function Initialize-KikiPatchState {
         if ($previousHead -ne $head) {
             throw 'QEMU HEAD changed since this incremental build was prepared. Use a new checkout for that revision; no source or artifacts were reset.'
         }
+        $upgrade = Test-KikiManagedCloseUpgrade $Recipe $state.RecipeHash $state.Applied
         if ($state.Version -ne 1 -or $state.Source -ne $Source -or $state.Msys2 -ne $MsysRoot -or
-            $state.RecipeHash -ne $recipeHash -or $state.DiffHash -ne $diffHash -or
+            ($state.RecipeHash -ne $recipeHash -and -not $upgrade) -or $state.DiffHash -ne $diffHash -or
             ($state.Applied -isnot [long] -and $state.Applied -isnot [int]) -or
             $state.Applied -lt 0 -or $state.Applied -gt $Recipe.Patches.Count) {
             throw 'Source, build recipe or MSYS2 path changed outside this build. No files were reset; use a new clean checkout.'
+        }
+        if ($upgrade) {
+            $state.RecipeHash = $recipeHash
+            Save-KikiPatchState $statePath $state
+            Write-Host 'Verified four-patch build: adding the managed-close fix incrementally; existing artifacts retained.'
         }
     } else {
         if ($diffHash -ne (Get-KikiTextHash '')) { throw 'QEMU has local tracked changes. No patches were applied; use a clean checkout.' }
@@ -263,12 +270,25 @@ function Assert-KikiPlainDirectory {
     }
 }
 
+function Test-KikiManagedCloseUpgrade {
+    param([System.Collections.IDictionary]$Recipe, [string]$PreviousHash, $Applied)
+    if ($PreviousHash -ne 'd0c7ffab1ec9ca8525aac148c2e437dc3cf9916294f33c7a35af8a64202e9247' -or
+        ($Applied -isnot [long] -and $Applied -isnot [int]) -or $Applied -ne 4 -or
+        $Recipe.Patches.Count -ne 5 -or $Recipe.Patches[4].Name -ne 'qemu-sdl-managed-close.patch') { return $false }
+    $legacy = [ordered]@{}
+    foreach ($key in $Recipe.Keys) {
+        $legacy[$key] = if ($key -eq 'Patches') { @($Recipe.Patches[0..3]) } else { $Recipe[$key] }
+    }
+    return (Get-KikiTextHash ($legacy | ConvertTo-Json -Depth 8 -Compress)) -eq $PreviousHash
+}
+
 function Get-KikiPatchFiles {
     param([string]$Cache, [System.Collections.IDictionary]$Recipe)
     foreach ($patch in $Recipe.Patches) {
         $path = Join-Path $Cache $patch.Name
         if (-not (Test-Path -LiteralPath $path)) {
-            $url = "$($Recipe.PatchBaseUrl)/$($Recipe.PatchRevision)/patches/$($patch.Name)"
+            $revision = if ($patch.Contains('Revision')) { $patch.Revision } else { $Recipe.PatchRevision }
+            $url = "$($Recipe.PatchBaseUrl)/$revision/patches/$($patch.Name)"
             Write-Host "Downloading pinned patch: $($patch.Name)"
             Invoke-WebRequest -Uri $url -OutFile "$path.download"
             if ((Get-FileHash -LiteralPath "$path.download" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $patch.Sha256) {

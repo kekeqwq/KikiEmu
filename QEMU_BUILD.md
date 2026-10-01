@@ -34,7 +34,7 @@ continues with your current HEAD; the fixed patches or compilation may fail.
 It never checks out or locks an upstream revision for you.
 
 The script checks installed packages, skips installation when none are missing,
-installs only missing dependencies, verifies and applies the four fixed patches,
+installs only missing dependencies, verifies and applies the five fixed patches,
 then builds native ARM64 QEMU with WHPX, SDL, GTK, OpenGL, VirGL and slirp.
 It uses the supplied MSYS2's CLANGARM64 tools, never WSL. QEMU's shell-based
 configure is called internally; there is no separate user `.sh` step.
@@ -55,6 +55,13 @@ receipt stay in `.kiki-qemu-build/`. The script refuses unrelated source changes
 or an unmanaged nonempty `bin`; it does not reset source or clean old files.
 The receipt records your actual HEAD; use a new checkout if changing revisions
 after patching rather than reusing stale patch/build state.
+The verified earlier four-patch recipe can receive the fifth managed-close
+fix incrementally, without resetting source or deleting build output. Stop
+your instance before recompiling, download the updated build.ps1 and rerun it;
+then use `kikiemu set --id 01 --qemu <your bin directory>` to revalidate it.
+This fix is required: old binaries do not forward the SDL close button to
+Android's orderly shutdown. Closing the window must save/unmount guest data,
+not cut power. Only explicit `delete --force` may force-stop a guest.
 It does **not** copy/export DLLs or ROMs, move/package output, install KikiEmu,
 modify persistent host settings, or start QEMU. Actual build testing is yours.
 

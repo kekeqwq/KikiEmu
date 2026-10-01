@@ -68,11 +68,16 @@ Check ($environment.PATH -notmatch 'ucrt64|clang64') 'no x86 toolchain leakage'
 Check ($environment.BASH_ENV -eq $null -and $environment.PYTHONPATH -eq $null) 'no shell or Python profile injection'
 
 $recipe = Get-KikiQemuRecipe
-Check ($recipe.Patches.Count -eq 4) 'all four patches pinned'
+Check ($recipe.Patches.Count -eq 5) 'all five patches pinned'
 foreach ($patch in $recipe.Patches) {
     Check ((Get-FileHash -LiteralPath (Join-Path $project "patches/$($patch.Name)")).Hash.ToLowerInvariant() -eq $patch.Sha256) "tracked patch hash: $($patch.Name)"
 }
-Check ((Get-KikiTextHash ($recipe | ConvertTo-Json -Depth 8 -Compress)) -eq 'd0c7ffab1ec9ca8525aac148c2e437dc3cf9916294f33c7a35af8a64202e9247') 'deterministic ordered recipe hash'
+Check (Test-KikiManagedCloseUpgrade $recipe 'd0c7ffab1ec9ca8525aac148c2e437dc3cf9916294f33c7a35af8a64202e9247' 4) 'exact old recipe supports append-only upgrade'
+Check (-not (Test-KikiManagedCloseUpgrade $recipe 'unknown' 4)) 'unknown old recipe cannot be upgraded'
+Check (-not (Test-KikiManagedCloseUpgrade $recipe 'd0c7ffab1ec9ca8525aac148c2e437dc3cf9916294f33c7a35af8a64202e9247' 3)) 'incomplete old recipe cannot be upgraded'
+$changedRecipe = $recipe | ConvertTo-Json -Depth 8 | ConvertFrom-Json -AsHashtable
+$changedRecipe.Patches[0].Sha256 = 'changed'
+Check (-not (Test-KikiManagedCloseUpgrade $changedRecipe 'd0c7ffab1ec9ca8525aac148c2e437dc3cf9916294f33c7a35af8a64202e9247' 4)) 'upgrade cannot accept changed earlier patches'
 
 # Exercise a real hidden child with pipes, without installing/building/running
 # QEMU. PowerShell script-block callbacks on async event threads are avoided.
@@ -172,7 +177,7 @@ try {
         $downloadCache = Join-Path $scratch 'remote-patches'
         [void][IO.Directory]::CreateDirectory($downloadCache)
         $downloaded = @(Get-KikiPatchFiles $downloadCache $recipe)
-        Check ($downloaded.Count -eq 4) 'all real immutable remote patch hashes verified'
+        Check ($downloaded.Count -eq 5) 'all real immutable remote patch hashes verified'
     }
 } finally {
     # Delete only this freshly created unique TEMP fixture, never a user repo.

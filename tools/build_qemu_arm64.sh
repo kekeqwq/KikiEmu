@@ -63,6 +63,9 @@ fi
 git -C "$source_dir" apply --check "$repo_root/patches/qemu-sdl-channel-title.patch"
 git -C "$source_dir" apply "$repo_root/patches/qemu-sdl-channel-title.patch"
 
+git -C "$source_dir" apply --check "$repo_root/patches/qemu-sdl-managed-close.patch"
+git -C "$source_dir" apply "$repo_root/patches/qemu-sdl-managed-close.patch"
+
 mkdir -p "$source_dir/build"
 (
     cd "$source_dir/build"
