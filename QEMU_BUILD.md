@@ -14,7 +14,7 @@ git clone https://gitlab.com/qemu-project/qemu.git ~/Repos/qemu
 if ($LASTEXITCODE -ne 0) { throw 'QEMU clone failed.' }
 cd ~/Repos/qemu
 
-Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/d614f2df791174d90943eaf02a3f3ca4a4d0e30a/build.ps1' -OutFile ./build.ps1
+Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/aa1ba7763ccf2d85e7aa01764c7be468fbe05396/build.ps1' -OutFile ./build.ps1
 ./build.ps1 --msys2 'C:\msys64'
 ```
 
