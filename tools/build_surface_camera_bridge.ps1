@@ -35,7 +35,7 @@ $receiptPath = $OutputPath + '.build-receipt.json'
 Initialize-KikiBuildReceipt -Path $receiptPath -Kind 'surface-camera'
 $sourceInputs = @($sourcePath, $winrtSourcePath, (Join-Path $PSScriptRoot 'surface_camera_winrt.h'), (Join-Path $PSScriptRoot 'build_surface_camera_bridge.ps1'),
     (Join-Path $PSScriptRoot 'build_receipt.ps1'))
-$sourceInputs += @((Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'surface_camera*.hpp' -File).FullName)
+$sourceInputs += @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'surface_camera*.hpp' -File | ForEach-Object { $_.FullName })
 $snapshot = Get-KikiBuildSnapshot -RepoRoot $repoRoot -SourceFiles $sourceInputs
 
 & $compiler -std=c++20 -O2 -Wall -Wextra -Wno-unused-parameter -static `
