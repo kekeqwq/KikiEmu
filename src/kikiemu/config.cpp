@@ -157,6 +157,8 @@ Resources updated_resources(const Command& command, const Resources& current) {
 fs::path normalize_directory(const std::wstring& value) {
     if (value.empty() || value.find(L'\0') != std::wstring::npos)
         throw std::runtime_error("Directory path is empty or invalid.");
+    if (std::any_of(value.begin(), value.end(), [](wchar_t c) { return c < 32; }))
+        throw std::runtime_error("Path contains a control character/newline. Pass the whole path as one quoted argument.");
     fs::path path(value);
     if (value.front() == L'~') {
         if (value.size() > 1 && value[1] != L'/' && value[1] != L'\\')
@@ -172,7 +174,11 @@ fs::path normalize_directory(const std::wstring& value) {
         throw std::runtime_error("Drive-relative paths are not supported; use an absolute path.");
     // Existing symlinks/junctions resolve before recording identity. Missing
     // storage targets are allowed here; the installer checks their ownership.
-    return fs::weakly_canonical(fs::absolute(path)).lexically_normal();
+    auto result = fs::weakly_canonical(fs::absolute(path)).lexically_normal().make_preferred();
+    // A trailing separator is a valid user directory spelling, not an empty
+    // storage component. Strip it centrally, preserving drive/UNC roots.
+    while (result != result.root_path() && !result.has_filename()) result = result.parent_path();
+    return result;
 }
 
 std::wstring quote_windows_arg(const std::wstring& value) {

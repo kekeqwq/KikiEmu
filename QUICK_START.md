@@ -1,12 +1,12 @@
 # KikiEmu 0.1 Alpha — Windows ARM64
 
-This is a candidate guide. Public release and system acceptance are still
-pending. Do not substitute a development disk/bundle for the system ZIP.
+This is the 0.1 Alpha guide. Do not substitute a development disk/bundle for
+the clean system ZIP. See [release details and limitations](RELEASE_0_1_ALPHA.md).
 
 ## What to obtain
 
-1. `setup.exe` from the KikiEmu release.
-2. `KikiAOSP-0.1.0-alpha-arm64.zip` from the kikiaosp_test release.
+1. `setup.exe` from the [KikiEmu release](https://github.com/kekeqwq/KikiEmu/releases/tag/v0.1.0-alpha).
+2. `KikiAOSP-0.1.0-alpha-arm64.zip` from the [kikiaosp_test release](https://github.com/kekeqwq/kikiaosp_test/releases/tag/v0.1.0-alpha).
 3. A compatible, privately deployed **native ARM64 patched QEMU bin directory**.
    QEMU is user-provided; setup does not install it or an Android disk.
 
@@ -17,10 +17,11 @@ WHPX and a real system boot are required; byte/architecture checks alone cannot
 prove GPU or driver compatibility. [Build QEMU independently](QEMU_BUILD.md):
 clone only upstream QEMU, enter it, download `build.ps1`, and run it with your
 MSYS2 path. No KikiEmu clone is required. Original output stays in QEMU's
-`bin`; DLL/ROM deployment is not performed by the build-only script. After
-compiling, download and run the separate `prepare.ps1` from the same QEMU
-checkout, as described in that guide. It adds missing private DLLs/ROMs without
-recompiling or replacing EXEs. Then pass that complete bin to `create`.
+`bin`; the build script does not deploy DLLs/ROMs. Pass bin directly to
+`create`: KikiEmu prepares missing DLLs/ROMs automatically from the build's
+recorded MSYS2/source paths. Complete runtimes are left unchanged. You do not
+run prepare.ps1 or clone KikiEmu. Keep the matching MSYS2 installation and
+QEMU pc-bios until preparation is complete.
 
 ## Install and initialize
 
@@ -37,7 +38,12 @@ kikiemu set --default 01
 `--system`, `--storage`, `--size` and `--qemu` are required. The storage folder
 must be NEW. `--performance default|medium|high` is optional. `--create` is an
 alias for `create`. `g` means GiB. Choose your own total size; 200g is an example,
-not a fixed limit. The total includes the system and all partitions/reserves,
+not a fixed limit.
+
+`~/` and `~\` paths expand inside KikiEmu to your current user profile. Quote
+paths containing spaces. create prints live validation, extraction, import
+and disk-readback progress; success is reported only after registration.
+The total includes the system and all partitions/reserves,
 and is immutable after creation. The standalone QCOW2 grows physically as data
 is written; it is not preallocated. Host use, decimal GB displayed by Android,
 filesystem overhead and free data space are not the same quantity.
@@ -153,6 +159,6 @@ QEMU or ZIP files. Reinstall preserves the instance records.
 The user tests installation/uninstallation, PATH, shortcuts and public CLI
 flows. Internal build/library checks are not substitutes for that acceptance.
 The agent separately verifies the clean system's boot, persistent capacity,
-UI/input, GPU/120 Hz, audio and front/rear camera behavior. Do not publish or
-retag unaccepted candidate bytes. Unsigned Alpha binaries may trigger Windows
+UI/input, GPU/120 Hz, audio and front/rear camera behavior. Published assets
+are immutable; fixes use a new version. Unsigned Alpha binaries may trigger Windows
 SmartScreen; no signing certificate or bypass of Windows security is bundled.

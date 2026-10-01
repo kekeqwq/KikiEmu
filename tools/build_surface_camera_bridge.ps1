@@ -38,8 +38,15 @@ $sourceInputs = @($sourcePath, $winrtSourcePath, (Join-Path $PSScriptRoot 'surfa
 $sourceInputs += @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'surface_camera*.hpp' -File | ForEach-Object { $_.FullName })
 $snapshot = Get-KikiBuildSnapshot -RepoRoot $repoRoot -SourceFiles $sourceInputs
 
+$cameraObjects = @()
+foreach ($source in @($sourcePath, $winrtSourcePath)) {
+    $object = Join-Path $outputDirectory (([IO.Path]::GetFileNameWithoutExtension($source)) + '.o')
+    & $compiler -std=c++20 -O2 -Wall -Wextra -Wno-unused-parameter -static -c $source -o $object
+    if ($LASTEXITCODE -ne 0) { throw 'Native camera object build failed.' }
+    $cameraObjects += $object
+}
 & $compiler -std=c++20 -O2 -Wall -Wextra -Wno-unused-parameter -static `
-    $sourcePath $winrtSourcePath -o $OutputPath `
+    @cameraObjects -o $OutputPath `
     -lole32 -lmfplat -lmfreadwrite -lmf -lmfuuid -lws2_32 -luuid -lwindowsapp -lonecore
 if ($LASTEXITCODE -ne 0) {
     throw "Surface camera bridge build failed with exit code $LASTEXITCODE."

@@ -3,12 +3,23 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <exception>
 #include <map>
 #include <string>
 #include <vector>
 
 namespace kiki {
 namespace fs = std::filesystem;
+using Progress = std::function<void(const std::string&)>;
+inline void report(const Progress& progress, const std::string& message) {
+    if (progress) progress(message);
+}
+inline std::string exception_message(std::exception_ptr error) {
+    try { std::rethrow_exception(error); }
+    catch (const std::exception& original) { return original.what(); }
+    catch (...) { return "Unknown installation failure"; }
+}
 
 struct Command {
     std::string name;

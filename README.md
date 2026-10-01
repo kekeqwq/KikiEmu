@@ -8,9 +8,9 @@
 | [kikiaosp_kernel](https://github.com/kekeqwq/kikiaosp_kernel) | Linux 7.3-rc4 4 KiB 内核与 Nix 构建 |
 | 本仓库 | Windows ARM64 QEMU 补丁及构建、摄像头桥接、开发镜像收集/启动/测试；终端用户配置管理器、系统安装器与桌面启动入口 |
 
-## 0.1 Alpha 候选与后续开发
+## 0.1 Alpha 与后续开发
 
-终端用户先看 [英文使用说明](QUICK_START.md)，QEMU 单独按 [QEMU 构建说明](QEMU_BUILD.md) 准备。当前 R8 的 `setup.exe` 与干净系统 ZIP 已生成；实际源提交、校验值和系统测试边界见 [候选记录](CANDIDATE_TEST_20261001.md)。安装器、PATH、快捷方式与公开 CLI 的验收由用户执行，尚未发布 GitHub Release。不要使用下面历史 bundle 的启动命令初始化发行实例。
+终端用户下载 [KikiEmu 0.1 Alpha 的 setup.exe](https://github.com/kekeqwq/KikiEmu/releases/tag/v0.1.0-alpha) 和 [KikiAOSP 0.1 Alpha 系统 ZIP](https://github.com/kekeqwq/kikiaosp_test/releases/tag/v0.1.0-alpha)，先看 [英文使用说明](QUICK_START.md)。QEMU 独立按 [构建说明](QEMU_BUILD.md) 编译，KikiEmu 自动检查并准备 bin 内缺少的运行依赖，用户无需运行 prepare.ps1。版本范围、源码／许可材料和已知限制见 [0.1 Alpha 记录](RELEASE_0_1_ALPHA.md)，此前 R8 过程保留在 [候选记录](CANDIDATE_TEST_20261001.md)。不要使用下面历史 bundle 的启动命令初始化发行实例。
 
 按2026-10-01更新的约定，后续修补从本次干净包基线推进：设备／内核仓库构建 → 保持 format-1 的新版本 ZIP → KikiEmu 在新 storage 中初始化并实测 → 推进0.2、0.3。取消独立 Dev 通道与严格开发／发行并行隔离门槛；保留单实例 UUID、进程／端点身份和磁盘所有权核验。已有实例不自动换系统，已发布资产不覆盖；0.1不支持就地升级系统或调整磁盘总容量。
 
@@ -31,7 +31,7 @@ adb -s $serial shell
 
 普通 adb 需要另装 Android Platform Tools；端口每次启动重新分配，**不要固定使用5555**。重启后重新运行上面的命令；多设备时始终指定 `-s $serial`。安装 APK、传照片与断开连接的完整示例见 [QUICK_START.md](QUICK_START.md#connect-ordinary-android-platform-tools-adb)。不使用外部 adb 时可以直接 `kikiemu adb --id 01 --shell "uname -r"`。
 
-本轮内部系统测试还没有安装到公开实例 registry，不能用公开 `kikiemu info` 查询它。它在2026-10-01当前会话的端口为51590，已实际连接验证：`adb connect 127.0.0.1:51590`、`adb -s 127.0.0.1:51590 shell`。这个数字仅用于本次现有窗口，不是发行默认值，也不承诺下次启动相同。
+开发侧内部回归实例不在公开实例 registry 中，不能用公开 `kikiemu info` 查询；发行用户按上面的命令获取自己的当前端口，不要复用开发日志中的数字。
 
 ## 历史开发回溯主线：2026-09-30
 
@@ -107,7 +107,7 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH
 git clone https://gitlab.com/qemu-project/qemu.git ~/Repos/qemu
 if ($LASTEXITCODE -ne 0) { throw 'QEMU clone failed.' }
 cd ~/Repos/qemu
-Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/2b4fe858b5bde615275949001ee6d0433cb76fa7/build.ps1' -OutFile ./build.ps1
+Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/main/build.ps1' -OutFile ./build.ps1
 ./build.ps1 --msys2 'C:\msys64'
 ```
 
@@ -115,18 +115,11 @@ Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/2b4fe858b5b
 
 建议但不强制使用已验证的 QEMU 提交 `bde658eef6b38c45794bfd7ad4d2dd1b574e4694`，需要时在构建前自行执行 `git checkout --detach bde658eef6b38c45794bfd7ad4d2dd1b574e4694`。其他提交只输出兼容性警告，仍会继续尝试补丁和构建，可能失败；脚本不会替用户切换或锁定提交。增量记录保存实际 HEAD，打过补丁后若换版本则使用新 checkout，不复用旧补丁／构建状态。
 
-产物直接留在 **QEMU 源码目录的 `bin`**，重复运行同一命令可增量构建。`build.ps1` 仅处理依赖、补丁和构建，不移动、导出、清理或启动产物，不更改宿主的持久配置。DLL/ROM 部署使用下一步独立入口，绝不混入构建脚本。独立英文说明见 [QEMU_BUILD.md](QEMU_BUILD.md)。上面历史开发流程中的 `.sh` 和内部导出工具不属于这个用户流程。
+产物直接留在 **QEMU 源码目录的 `bin`**，重复运行同一命令可增量构建。`build.ps1` 仅处理依赖、补丁和构建，不移动、导出、清理或启动产物，不更改宿主的持久配置。KikiEmu 的 create／set --qemu／doctor --qemu 自动检查并准备运行依赖，不把部署混进构建脚本。独立英文说明见 [QEMU_BUILD.md](QEMU_BUILD.md)。上面历史开发流程中的 `.sh` 和内部导出工具不属于终端用户流程。
 
-构建标准输出和错误输出实时显示，失败会附带最后的诊断信息。新版入口已在用户的 QEMU master `f7ada39e` 上通过原生 ARM64 配置并进入真实 C 编译，按用户要求中止并保留增量产物；不宣称完整构建或运行验证已完成。
+构建标准输出和错误输出实时显示，失败会附带最后的诊断信息。用户已完成 QEMU master `f7ada39e` 原生 ARM64 构建；静态检查不能代替宿主硬件和实际系统回归。
 
-用户完成构建后，保持在同一份 QEMU 源码根目录，另行下载并运行独立依赖准备脚本：
-
-```powershell
-Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/51b272b92f33ca8dbf2740d80fd22d0df80121f3/prepare.ps1' -OutFile ./prepare.ps1
-./prepare.ps1 --msys2 'C:\msys64'
-```
-
-`prepare.ps1` 用该 MSYS2 的 CLANGARM64 工具静态检查三个 EXE 的原生 ARM64 递归依赖，只把缺少的私有 DLL 和该 QEMU 源码配套的 ROM 复制到 `bin`／`bin/roms`；不重新编译、不替换 EXE、不启动系统、不安装包、不修改宿主配置。已存在且相同的文件跳过，冲突文件报错而不覆盖。准备时关闭使用该 bin 的进程，并保留编译时配套的 MSYS2 库版本。无需克隆 KikiEmu 或编译内部检查器。
+创建时 KikiEmu 检查三个 EXE：缺少时给出重新编译提示；目录已完整时不写任何运行文件；只缺 DLL／ROM 时读取 QEMU 源码根目录 `.kiki-qemu-build/state.json` 记录的 MSYS2 路径，静态检查递归 ARM64 依赖，再补齐私有 DLL 和配套 ROM。请保留编译时的 MSYS2 库版本和源码 pc-bios。已有冲突文件或正在使用的 bin 拒绝覆盖，不自动重编译、不替换 EXE、不启动系统、不改 PATH。完整独立运行目录可以放任意位置，也不需要 MSYS2／构建记录。prepare.ps1 仅留作开发诊断，不再要求用户运行。
 
 0.1 的模块边界：KikiEmu 只做配置管理、系统安装和按配置启动；KikiAOSP ZIP 只包含系统必需文件及配套内核；QEMU 由用户独立构建/提供。以下接口已包含在R8候选安装器中，等待用户安装／公开CLI验收：
 
@@ -140,7 +133,7 @@ kikiemu --delete --force --id 01
 
 删除接口为 `kikiemu --delete --force --id 01`，也接受 `kikiemu delete --force --id 01`。它不再询问确认：核验目标实例和 storage 所有权后，终止仅属于该实例的 QEMU/配套进程，永久删除其 storage 文件夹及全部数据；若为默认实例，同时清除默认设置。必须显式提供 ID 和 `--force`，不允许传入任意删除路径；路径/实例/进程身份不符时拒绝，不会清理其他实例、原始 ZIP 或用户提供的 QEMU。卸载启动器仍默认保留用户系统数据。完整事务与安全约束见 [发行规划](RELEASE_PLAN.md#explicit-destructive-instance-deletion)。该接口已包含在编译好的候选 setup.exe 中；精确所属进程终止、运行中 storage lease 删除、默认注销及失败恢复通过内部检查，公开 CLI/delete 的用户验收仍待完成。
 
-用户提供的运行目录需要满足上述 DLL/ROM 检查；`create` 报缺少 `zlib1.dll` 时，使用上述独立 `prepare.ps1` 补齐整个依赖闭包，不要只复制一个 DLL 或用旧文件冒充。已在用户完成的 `f7ada39e` 三个 EXE 的隔离副本上补齐49个 DLL、43个 ROM，并通过启动器的静态验证，三个 EXE 哈希不变；用户的原始 bin 未被这次测试修改。此前完整运行目录的系统证据见候选记录，新的静态验证不代表这份用户构建已完成系统启动／GPU 验收。
+`~/xxx` 和 `~\xxx` 由 KikiEmu 展开为当前用户主目录，尾随分隔符可正常使用；空格路径请加引号。系统包不存在、目录已有数据、运行依赖不完整、路径歧义等报错给出实际目标，不把不存在的文件误报成路径重定向。create 实时输出检查、解包、导入进度、磁盘回读和注册日志；失败不静默覆盖用户已有目录。不要只复制一个 DLL 或用旧 EXE 冒充新构建。
 
 发行配方包含 [通道标题补丁](patches/qemu-sdl-channel-title.patch)：正式版设置 `KIKI_SDL_WINDOW_TITLE=KikiEmu`，无该环境变量时保留开发标题行为。配置管理器要求这个编译能力标记，所以新入口固定应用全部四份补丁，不能用旧开发 EXE 代替。静态检查不能代替完整系统启动或宿主 GPU 兼容性实测。
 

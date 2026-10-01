@@ -8,7 +8,9 @@ int wmain(int argc, wchar_t** argv) {
         const auto command = kiki::parse_command(std::vector<std::wstring>(argv + 1, argv + argc));
         auto paths = kiki::user_manager_paths();
         kiki::InstallationLease installation(paths.appRoot);
-        std::cout << kiki::execute_management(command, paths);
+        std::cout << kiki::execute_management(command, paths, [](const std::string& message) {
+            std::cout << "[KikiEmu] " << message << std::endl;
+        });
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Error: " << error.what() << '\n'; return 1;

@@ -57,7 +57,8 @@ void safe_target(const fs::path& path, const std::vector<fs::path>& protectedTre
         auto text = part.wstring();
         if (text.empty() || text == L"." || text == L".." || text.back() == L'.' || text.back() == L' ' ||
             text.find_first_of(L":*?\"<>|") != std::wstring::npos)
-            throw std::runtime_error("Ambiguous storage path; deletion refused.");
+            throw std::runtime_error("Ambiguous storage path: " + utf8(path.wstring()) +
+                " (component '" + utf8(text) + "'). Operation refused; no files were removed.");
     }
     // Reject these directories or their ancestors, not normal user-created
     // children such as Downloads/MyAndroid. System/program trees are forbidden

@@ -26,8 +26,18 @@ ZIP of this repository's own source is not that complete closure. QEMU is
 user-provided; the documented runtime export is a local development tool, not
 a claim that its output already satisfies every redistribution requirement.
 
-An installer candidate has been compiled, not installed or publicly released;
-the actual clean system ZIP is still being built. Copying notices, selecting
-GPLv3 and recording binary hashes do not establish completion of the full
-third-party source/license audit. Release license/provenance auditing remains
-a publication gate in [RELEASE_PLAN.md](RELEASE_PLAN.md).
+The 0.1 Alpha release supplies a separate source kit: exact project sources,
+installed MSYS2 dependency source archives/recipes, matching NSIS sources,
+component notices, application object files and static libraries. Use its
+`relink_launcher.ps1` with MSYS2 CLANGARM64; `-LibraryDirectory` places compatible
+replacement libraries before the supplied libraries. Relinking creates new
+executables and does not execute/install them. The project source ZIP inside
+the kit also provides full recompilation and installer build recipes. Preserve
+all original notices when rebuilding or redistributing.
+
+The KikiAOSP release separately supplies its actual kernel source, pinned
+kernel configuration/patches, built device tree, AOSP manifest and source
+archives for notice-identified copyleft components/build interfaces. See
+[the release record](RELEASE_0_1_ALPHA.md). This is a documented distribution
+inventory, not a blanket relicensing or a guarantee about every future
+dependency/version; repeat the inventory when inputs change.

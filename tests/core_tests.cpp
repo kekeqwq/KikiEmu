@@ -213,6 +213,14 @@ int wmain(int argc, wchar_t** argv) {
         auto cpuOnly = updated_resources(parse_command({L"set", L"--id", L"01", L"--cpus", L"10"}), custom);
         check(cpuOnly.cpus == 10 && cpuOnly.memoryBytes == 8ULL << 30, "CPU-only update preserves saved memory");
         check(normalize_directory(L"~/Tools/../My Android").is_absolute(), "tilde path normalized");
+        check(normalize_directory(L"~/Documents/KikiAosp") == normalize_directory(L"~") / L"Documents/KikiAosp",
+              "forward-slash home path expands to current profile");
+        check(normalize_directory(L"~\\Documents\\KikiAosp\\") == normalize_directory(L"~/Documents/KikiAosp"),
+              "backslash home path and trailing separator normalized");
+        check(normalize_directory(L"~/Documents/kiki-missing-parent-test/child///").has_filename(),
+              "new nested target has no empty trailing component");
+        check(normalize_directory(L"C:\\") == fs::path(L"C:\\"), "drive root preserved during normalization");
+        rejects([] { normalize_directory(L"~/Documents/line\nwrap"); }, "newline path accepted");
         rejects([] { normalize_directory(L"~someone/bin"); }, "foreign home expansion accepted");
         rejects([] { normalize_directory(L"C:bin"); }, "drive relative path accepted");
         check(utf16(utf8(L"测试路径 / QEMU")) == L"测试路径 / QEMU", "Unicode round trip");
@@ -289,6 +297,37 @@ int wmain(int argc, wchar_t** argv) {
         // Destructive checks use ONLY brand-new isolated temporary fixtures,
         // never development/user VM disks or the public CLI/installer registry.
         const auto temp = temporary_fixture_root();
+        const auto automaticRoot = temp / "automatic-qemu", automaticBin = automaticRoot / "bin";
+        const auto automaticMsys = temp / "automatic-msys", automaticDeps = automaticMsys / "clangarm64/bin";
+        fs::create_directories(automaticBin); fs::create_directories(automaticDeps);
+        rejects([&] { prepare_qemu(automaticBin); }, "missing EXEs did not request compilation");
+        for (const auto* name : {"qemu-system-aarch64.exe", "qemu-img.exe", "qemu-io.exe"})
+            fs::copy_file(fs::path(executable), automaticBin / name);
+        fs::copy_file(fs::path(executable).parent_path() / "zlib1.dll", automaticDeps / "zlib1.dll");
+        rejects([&] { prepare_qemu(automaticBin); }, "incomplete runtime without build receipt accepted");
+        check(!fs::exists(automaticBin / "zlib1.dll") && !fs::exists(automaticBin / "roms"),
+              "missing receipt changes no runtime files");
+        fs::create_directory(automaticRoot / ".kiki-qemu-build"); fs::create_directory(automaticRoot / "pc-bios");
+        write_fixture(automaticRoot / "pc-bios/test.bin", "isolated ROM fixture, not bootable");
+        write_fixture(automaticRoot / "pc-bios/README.txt", "not a ROM");
+        write_fixture(automaticRoot / ".kiki-qemu-build/state.json", nlohmann::json({{"Version", 1},
+            {"Source", utf8(automaticRoot.wstring())}, {"Msys2", utf8(automaticMsys.wstring())}}).dump());
+        std::vector<std::string> preparationMessages;
+        auto originalExeHash = sha256(automaticBin / "qemu-system-aarch64.exe");
+        const auto automaticBinding = prepare_qemu(automaticBin, [&](const std::string& line) { preparationMessages.push_back(line); });
+        check(fs::exists(automaticBin / "zlib1.dll") && fs::exists(automaticBin / "roms/test.bin"),
+              "manager prepares private DLL and ROM from recorded build sources");
+        check(!fs::exists(automaticBin / "roms/README.txt") && sha256(automaticBin / "qemu-system-aarch64.exe") == originalExeHash,
+              "automatic preparation preserves EXEs and excludes ROM documentation");
+        check(!automaticBinding.at("exportOnly").get<bool>() && !preparationMessages.empty(),
+              "automatic preparation returns a private binding and emits progress");
+        const auto dllTime = fs::last_write_time(automaticBin / "zlib1.dll"), romTime = fs::last_write_time(automaticBin / "roms/test.bin");
+        check(prepare_qemu(automaticBin) == automaticBinding && fs::last_write_time(automaticBin / "zlib1.dll") == dllTime &&
+              fs::last_write_time(automaticBin / "roms/test.bin") == romTime, "ready runtime is read-only and preparation is idempotent");
+        // A complete independently moved runtime needs no MSYS2 or receipt.
+        fs::remove(automaticRoot / ".kiki-qemu-build/state.json");
+        check(prepare_qemu(automaticBin) == automaticBinding, "complete runtime does not require build metadata");
+        fs::remove_all(automaticRoot); fs::remove_all(automaticMsys); // Only these newly generated fixture trees.
         auto appFixture = temp / "installed-app";
         fs::create_directory(appFixture);
         rejects([&] { InstallationLease missing(appFixture); }, "missing installation lease accepted");
@@ -517,7 +556,11 @@ int wmain(int argc, wchar_t** argv) {
         zipFiles.insert(zipFiles.begin(), {"manifest.json", actual.dump()});
         const auto zipPath = temp / "contract-fixture-NOT-BOOTABLE.zip", stage = temp / "package-stage";
         fixture_zip(zipPath, zipFiles);
-        auto package = read_system_package(zipPath, stage);
+        std::vector<std::string> packageMessages;
+        rejects([&] { read_system_package(temp / "missing-package.zip", stage); }, "missing ZIP path accepted");
+        auto package = read_system_package(zipPath, stage, [&](const std::string& message) { packageMessages.push_back(message); });
+        check(packageMessages.size() > 5 && packageMessages.front().starts_with("Validating system ZIP:"),
+              "ZIP validation/extraction emits incremental English progress");
         check(package.manifest == actual && package.payloads.size() == 3 && package.archiveSha256 == sha256(zipPath), "native ZIP reader validates and stages only declared synthetic files");
         check(sha256(package.payloads.at("boot")) == sha256_text(fixtureBoot), "ZIP binary readback retains NUL/CRLF/byte identity");
         rejects([&] { read_system_package(zipPath, stage); }, "existing staging destination overwritten");

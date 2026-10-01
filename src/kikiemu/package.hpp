@@ -18,5 +18,6 @@ struct SystemPackage {
 // Read-only ZIP validation first, then extraction into ONLY a new owned
 // staging directory. libarchive is statically linked; no shell, archive-
 // supplied executable or download/host PATH fallback is involved.
-SystemPackage read_system_package(const fs::path& archive, const fs::path& newStagingDirectory);
+SystemPackage read_system_package(const fs::path& archive, const fs::path& newStagingDirectory,
+                                 const Progress& progress = {});
 } // namespace kiki

@@ -21,4 +21,7 @@ nlohmann::json parse_json_document(const std::string& text);
 nlohmann::json inspect_qemu(const fs::path& bin,
                            const std::vector<fs::path>& buildDependencySources = {});
 void verify_qemu_binding(const nlohmann::json& binding);
+// Explicit user-selected bin preparation for create/set/doctor only. Complete
+// runtimes are read-only; a partial build uses its matching builder receipt.
+nlohmann::json prepare_qemu(const fs::path& bin, const Progress& progress = {});
 } // namespace kiki

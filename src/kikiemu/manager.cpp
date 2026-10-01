@@ -37,17 +37,21 @@ std::string display_status(const json& record) {
         live = owned_process_is_live(parse_owned_process(process)) || live;
     return live ? status : "idle";
 }
-std::string create_instance(const Command& command, const ManagerPaths& paths, RegistryTransaction& registry) {
+std::string create_instance(const Command& command, const ManagerPaths& paths, RegistryTransaction& registry, const Progress& progress) {
     if (paths.channel != "release") throw std::runtime_error("Published system packages cannot initialize a development identity.");
+    report(progress, "Resolving system, storage and QEMU paths (~/ expands to the current user's home).");
     const auto archive = normalize_directory(command.options.at("system"));
     const auto target = normalize_directory(command.options.at("storage"));
     const auto bin = normalize_directory(command.options.at("qemu"));
     const auto capacity = parse_gib(command.options.at("size"));
     if (fs::exists(target)) throw std::runtime_error("Storage destination already exists. Choose a NEW directory; no existing data will be overwritten.");
-    auto binding = inspect_qemu(bin);
+    report(progress, "System package: " + utf8(archive.wstring()));
+    report(progress, "Storage: " + utf8(target.wstring()) + " (" + std::to_string(capacity >> 30) + " GiB total)");
+    if (!fs::is_regular_file(archive)) throw std::runtime_error("System package does not exist or is not a ZIP file: " + utf8(archive.wstring()) + ". Check --system.");
+    auto binding = prepare_qemu(bin, progress);
     auto protect = protected_paths(registry, paths); protect.push_back(bin); protect.push_back(archive);
     const auto uuid = new_instance_uuid();
-    auto package = read_system_package(archive, paths.registryRoot / "staging" / utf16(uuid));
+    auto package = read_system_package(archive, paths.registryRoot / "staging" / utf16(uuid), progress);
     std::optional<StorageIdentity> owner;
     bool stagePresent = true;
     try {
@@ -63,13 +67,15 @@ std::string create_instance(const Command& command, const ManagerPaths& paths, R
         {
             StorageLease destination(*owner, protect);
             StorageLease staged(package.stagingOwner);
-            disk = install_disk(binding, target / "disk", capacity, package.payloads, minimum, hashes);
+            disk = install_disk(binding, target / "disk", capacity, package.payloads, minimum, hashes, progress);
         }
         // Everything necessary is now in the standalone disk/cache. Nothing
         // at runtime depends on the original download or these extracted files.
+        report(progress, "Cleaning this installation's owned temporary staging files.");
         delete_storage(package.stagingOwner, {target, bin, archive, paths.appRoot}, [] {}); stagePresent = false;
         json source{{"manifest", package.manifest}, {"sourceLock", package.sourceLock},
                     {"archiveSha256", package.archiveSha256}, {"layout", disk}};
+        report(progress, "Registering the verified persistent instance.");
         auto id = registry.register_installed(*owner, source, binding, resources(command));
         return "Created id " + id + "\n";
     } catch (...) {
@@ -77,8 +83,17 @@ std::string create_instance(const Command& command, const ManagerPaths& paths, R
         // Fail closed: these identities belong ONLY to directories freshly
         // created by this transaction, never a preexisting user's folder.
         // An ownership/removal failure retains the marker and reports failure.
-        if (owner) delete_storage(*owner, protect, [] {});
-        if (stagePresent) delete_storage(package.stagingOwner, {target, bin, archive, paths.appRoot}, [] {});
+        std::string cleanupFailures;
+        auto cleanup = [&](const StorageIdentity& identity, const std::vector<fs::path>& roots) {
+            try { delete_storage(identity, roots, [] {}); }
+            catch (const std::exception& error) {
+                cleanupFailures += " Kept " + utf8(identity.directory.wstring()) + ": " + error.what() + ";";
+            }
+        };
+        if (owner) cleanup(*owner, protect);
+        if (stagePresent) cleanup(package.stagingOwner, {target, bin, archive, paths.appRoot});
+        if (!cleanupFailures.empty()) throw std::runtime_error("Installation failed: " + exception_message(original) +
+            ". Owned temporary cleanup also failed:" + cleanupFailures);
         std::rethrow_exception(original);
     }
 }
@@ -109,12 +124,12 @@ const char* management_help() {
            "Size is immutable TOTAL GiB; disks allocate host space as used.\n"
            "Delete permanently removes ALL storage/data for the explicitly named instance.\n";
 }
-std::string execute_management(const Command& command, const ManagerPaths& paths) {
+std::string execute_management(const Command& command, const ManagerPaths& paths, const Progress& progress) {
     if (command.name == "help") return management_help();
     if (command.name == "version") return "KikiEmu 0.1.0-alpha (Windows ARM64)\n";
     if (command.name == "doctor") {
         if (!command.options.contains("qemu")) throw std::runtime_error("Use doctor --qemu QEMU_BIN.");
-        return inspect_qemu(normalize_directory(command.options.at("qemu"))).dump(2) +
+        return prepare_qemu(normalize_directory(command.options.at("qemu")), progress).dump(2) +
             "\nRuntime files verified. Actual WHPX/GPU/display compatibility still requires a system boot.\n";
     }
     if (command.name == "start") return start_instance(paths, command.options.contains("id") ? value(command, "id") : "");
@@ -122,7 +137,7 @@ std::string execute_management(const Command& command, const ManagerPaths& paths
     if (command.name == "logs") return instance_logs(paths, value(command, "id"));
     if (command.name == "adb") return instance_shell(paths, value(command, "id"), value(command, "shell"));
     RegistryTransaction registry(paths.registryRoot, paths.channel);
-    if (command.name == "create") return create_instance(command, paths, registry);
+    if (command.name == "create") return create_instance(command, paths, registry, progress);
     if (command.name == "list") {
         std::ostringstream out; out << "id  system          storage  size  cpu  gpu    mem  status\n";
         for (const auto& [id, record] : registry.state().at("instances").items()) {
@@ -143,7 +158,7 @@ std::string execute_management(const Command& command, const ManagerPaths& paths
         auto budget = updated_resources(command, saved_resources(record));
         json binding = record.at("configuration").at("qemu");
         if (command.options.contains("qemu")) {
-            auto bin = normalize_directory(command.options.at("qemu")); binding = inspect_qemu(bin);
+            auto bin = normalize_directory(command.options.at("qemu")); binding = prepare_qemu(bin, progress);
             for (const auto& [otherId, other] : registry.state().at("instances").items()) {
                 (void)otherId; verify_storage_owner(parse_storage_identity(other.at("owner")), {bin, paths.appRoot, paths.registryRoot});
             }

@@ -10,6 +10,6 @@ struct ManagerPaths {
 // Production paths are fixed to the current user/channel. Explicit fixture
 // roots are an internal-library interface, NOT public CLI/env overrides.
 ManagerPaths user_manager_paths();
-std::string execute_management(const Command& command, const ManagerPaths& paths);
+std::string execute_management(const Command& command, const ManagerPaths& paths, const Progress& progress = {});
 const char* management_help();
 } // namespace kiki

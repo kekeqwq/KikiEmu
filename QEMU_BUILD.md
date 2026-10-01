@@ -14,7 +14,7 @@ git clone https://gitlab.com/qemu-project/qemu.git ~/Repos/qemu
 if ($LASTEXITCODE -ne 0) { throw 'QEMU clone failed.' }
 cd ~/Repos/qemu
 
-Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/2b4fe858b5bde615275949001ee6d0433cb76fa7/build.ps1' -OutFile ./build.ps1
+Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/main/build.ps1' -OutFile ./build.ps1
 ./build.ps1 --msys2 'C:\msys64'
 ```
 
@@ -58,48 +58,33 @@ after patching rather than reusing stale patch/build state.
 It does **not** copy/export DLLs or ROMs, move/package output, install KikiEmu,
 modify persistent host settings, or start QEMU. Actual build testing is yours.
 
-The corrected script was tested locally on upstream HEAD
-`f7ada39edacaa5c26b30e98b94017b0b2ccbcf94`: native ARM64 configuration passed
-and Ninja started real C compilation. At the user's request the build was
-stopped with intermediates retained. Full compilation and runtime acceptance
-are still user-owned tests, not claimed as completed by this check.
+The user completed native ARM64 compilation on upstream HEAD
+`f7ada39edacaa5c26b30e98b94017b0b2ccbcf94`. A different checkout/GPU still
+requires system testing; successful compilation is not hardware certification.
 
-## Prepare the runtime (separate from building)
+## Let KikiEmu prepare the runtime
 
-After the build completes, remain in the **same QEMU checkout root** and run:
+After compilation, pass `<QEMU source>/bin` directly to `kikiemu create`.
+You do **not** download or run prepare.ps1. The manager checks the three EXEs,
+their native ARM64 static DLL dependency closure and private ROM directory.
 
-```powershell
-Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/51b272b92f33ca8dbf2740d80fd22d0df80121f3/prepare.ps1' -OutFile ./prepare.ps1
-./prepare.ps1 --msys2 'C:\msys64'
-```
+Missing EXEs produce a compile-first error. A complete runtime is used without
+writing files, even when it lives outside the source checkout. If only private
+DLLs/ROMs are missing, KikiEmu reads `.kiki-qemu-build/state.json` in the matching
+source root and uses its recorded **MSYS2 installation**, not a hardcoded path.
+It copies only missing private imports from CLANGARM64 and binary ROMs from
+that checkout's `pc-bios` into `bin/roms`, verifies SHA-256, then validates the
+complete private runtime. Saved launch bindings do not depend on MSYS2/PATH.
 
-This standalone script does not require a KikiEmu checkout. It reads the three
-compiled EXEs with CLANGARM64's `llvm-readobj`, recursively checks their normal
-and delay-loaded imports for native ARM64, and copies only missing private DLLs
-from your **matching MSYS2 installation** into `bin`. Windows system DLLs are
-not copied. It also copies matching binary ROM files from this checkout's
-`pc-bios` into `bin/roms`. Do not uninstall/update the build's dependencies
-between compilation and preparation.
-
-It never recompiles, launches QEMU, replaces EXEs, moves output, installs
-packages or changes PATH/host settings. Existing identical files are skipped;
-conflicting files cause an error, not an overwrite or cleanup. Close any
-process using that QEMU bin first. Use a new bin/build for another version;
-never copy old QEMU EXEs or unrelated DLLs to bypass an error. Repeating the
-command with the same sources is safe. Optional `-BinDirectory 'D:\Qemu\bin'`
-(or `--bin`) prepares another directory already containing the three matching
-EXEs; it does not export those EXEs for you.
-
-This resolves `QEMU bin is missing a private DLL: zlib1.dll` after a successful
-build; copying just zlib is insufficient because imports are recursive. The
-user's completed `f7ada39e` build was checked **using isolated EXE copies**:
-49 private DLLs and 43 ROMs were prepared, then the launcher's native runtime
-validator passed without a fallback dependency path. All three EXE hashes
-were unchanged. This is static runtime validation, not a new boot/GPU test;
-the user's original bin was not modified during these checks.
+Keep the build receipt, source tree and matching MSYS2 dependency versions
+until preparation finishes. No packages are installed, EXEs replaced, source
+reset, host settings changed or QEMU launched by preparation. Conflicting files,
+external links, unknown build sources and an in-use incomplete bin refuse.
+Do not substitute old runtimes to bypass these checks. prepare.ps1 remains a
+developer diagnostic only, not an end-user prerequisite.
 
 The launcher requires the three EXEs, adjacent private DLLs and `roms/`.
-Once prepared, select your own directory:
+Select your own directory; create prints preparation and installation logs:
 
 ```powershell
 kikiemu create --system ~/Downloads/KikiAOSP-0.1.0-alpha-arm64.zip --storage ~/MyAndroid --size 200g --qemu ~/Repos/qemu/bin

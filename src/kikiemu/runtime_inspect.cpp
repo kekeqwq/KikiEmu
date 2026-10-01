@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Development build tool, NOT the released instance manager. Does not start a
 // VM, install an app, alter PATH or write any configuration/user disk.
+// --prepare explicitly writes only missing runtime DLLs/ROMs for library tests.
 #include "runtime.hpp"
 #include <iostream>
 
@@ -8,7 +9,14 @@ int wmain(int argc, wchar_t** argv) {
     try {
         if (argc < 2 || argc > 3) {
             std::cerr << "Usage: kikiemu-runtime-inspect.exe QEMU_BIN [BUILD_DLL_SOURCE]\n";
+            std::cerr << "       kikiemu-runtime-inspect.exe --prepare QEMU_BIN\n";
             return 2;
+        }
+        if (argc == 3 && std::wstring(argv[1]) == L"--prepare") {
+            auto result = kiki::prepare_qemu(kiki::normalize_directory(argv[2]), [](const std::string& message) {
+                std::cerr << message << '\n';
+            });
+            std::cout << result.dump(2) << '\n'; return 0;
         }
         std::vector<kiki::fs::path> sources;
         if (argc == 3) sources.push_back(kiki::normalize_directory(argv[2]));

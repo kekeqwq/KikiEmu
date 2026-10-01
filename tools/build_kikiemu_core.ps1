@@ -65,13 +65,19 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Native application icon/manifest resource build failed.' }
 } finally { Pop-Location }
 $cli = Join-Path $OutputDirectory 'kikiemu.exe'
-& $compiler @flags @objects $resources (Join-Path $repoRoot 'src/kikiemu/cli.cpp') -o $cli @libs
+& $compiler @flags -c (Join-Path $repoRoot 'src/kikiemu/cli.cpp') -o (Join-Path $OutputDirectory 'cli.o')
+if ($LASTEXITCODE -ne 0) { throw 'Native CLI object build failed.' }
+& $compiler @flags @objects $resources (Join-Path $OutputDirectory 'cli.o') -o $cli @libs
 if ($LASTEXITCODE -ne 0) { throw 'Native manager-CLI build failed.' }
 $desktop = Join-Path $OutputDirectory 'kikiemu-desktop.exe'
-& $compiler @flags -mwindows @objects $resources (Join-Path $repoRoot 'src/kikiemu/desktop.cpp') -o $desktop @libs
+& $compiler @flags -c (Join-Path $repoRoot 'src/kikiemu/desktop.cpp') -o (Join-Path $OutputDirectory 'desktop.o')
+if ($LASTEXITCODE -ne 0) { throw 'Native desktop object build failed.' }
+& $compiler @flags -mwindows @objects $resources (Join-Path $OutputDirectory 'desktop.o') -o $desktop @libs
 if ($LASTEXITCODE -ne 0) { throw 'Native desktop-supervisor build failed.' }
 $setupHelper = Join-Path $OutputDirectory 'kikiemu-setup-helper.exe'
-& $compiler @flags -mwindows (Join-Path $repoRoot 'src/kikiemu/installation.cpp') (Join-Path $repoRoot 'src/kikiemu/setup_helper.cpp') $resources -o $setupHelper -lshell32 -lole32 -luuid -ladvapi32
+& $compiler @flags -c (Join-Path $repoRoot 'src/kikiemu/setup_helper.cpp') -o (Join-Path $OutputDirectory 'setup_helper.o')
+if ($LASTEXITCODE -ne 0) { throw 'Native setup-helper object build failed.' }
+& $compiler @flags -mwindows (Join-Path $OutputDirectory 'installation.o') (Join-Path $OutputDirectory 'setup_helper.o') $resources -o $setupHelper -lshell32 -lole32 -luuid -ladvapi32
 if ($LASTEXITCODE -ne 0) { throw 'Native private setup helper build failed.' }
 $inspector = Join-Path $OutputDirectory 'kikiemu-runtime-inspect.exe'
 & $compiler @flags @objects (Join-Path $repoRoot 'src/kikiemu/runtime_inspect.cpp') -o $inspector @libs
@@ -83,7 +89,7 @@ $diskPrototype = Join-Path $OutputDirectory 'kikiemu-disk-prototype.exe'
 & $compiler @flags @objects (Join-Path $repoRoot 'src/kikiemu/disk_prototype.cpp') -o $diskPrototype @libs
 if ($LASTEXITCODE -ne 0) { throw 'Native system-disk-prototype build failed.' }
 $systemRegression = Join-Path $OutputDirectory 'kikiemu-system-regression.exe'
-& $compiler @flags @objects (Join-Path $repoRoot 'tests/system_regression.cpp') -o $systemRegression @libs
+& $compiler @flags @objects $resources (Join-Path $repoRoot 'tests/system_regression.cpp') -o $systemRegression @libs
 if ($LASTEXITCODE -ne 0) { throw 'Native internal real-system-regression runner build failed.' }
 Write-Output "Built native ARM64 manager component and development tools: $OutputDirectory"
 Write-Output 'This does not build/install setup.exe, register an instance, change PATH or start QEMU.'

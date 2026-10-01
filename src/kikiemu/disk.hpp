@@ -25,7 +25,8 @@ uint32_t crc32(const unsigned char* data, size_t size);
 nlohmann::json install_disk(const nlohmann::json& qemuBinding, const fs::path& newDirectory,
                            uint64_t totalBytes, const std::map<std::string, fs::path>& payloads,
                            uint64_t minimumDataBytes,
-                           const std::map<std::string, std::string>& manifestHashes = {});
+                           const std::map<std::string, std::string>& manifestHashes = {},
+                           const Progress& progress = {});
 // Before the FIRST writer is started: compare qcow2 format/capacity/backing,
 // both GPT tables and direct-boot caches with the immutable installation
 // record. Userdata is mutable and is deliberately NOT hashed or reformatted.

@@ -14,6 +14,30 @@
 namespace kiki {
 using json = nlohmann::json;
 namespace {
+// Brand only windows belonging to this exact supervised QEMU child. QEMU's
+// SDL title comes from KIKI_SDL_WINDOW_TITLE; its executable is not rewritten.
+class QemuWindowIcons {
+    HICON small = nullptr, large = nullptr;
+    DWORD pid = 0;
+    static BOOL CALLBACK apply(HWND window, LPARAM context) {
+        auto& self = *reinterpret_cast<QemuWindowIcons*>(context);
+        DWORD owner = 0; GetWindowThreadProcessId(window, &owner);
+        if (owner != self.pid || !IsWindowVisible(window)) return TRUE;
+        DWORD_PTR ignored = 0;
+        if (self.small) SendMessageTimeoutW(window, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(self.small),
+            SMTO_ABORTIFHUNG, 40, &ignored);
+        if (self.large) SendMessageTimeoutW(window, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(self.large),
+            SMTO_ABORTIFHUNG, 40, &ignored);
+        return TRUE;
+    }
+public:
+    QemuWindowIcons() {
+        small = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, 32, 32, 0));
+        large = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, 64, 64, 0));
+    }
+    ~QemuWindowIcons() { if (small) DestroyIcon(small); if (large) DestroyIcon(large); }
+    void update(DWORD childPid) { pid = childPid; if (small || large) EnumWindows(apply, reinterpret_cast<LPARAM>(this)); }
+};
 std::string trim(std::string text) {
     auto first = text.find_first_not_of(" \t\r\n"); if (first == std::string::npos) return {};
     return text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1);
@@ -265,6 +289,7 @@ void supervise_instance(const ManagerPaths& paths, const std::string& id, const 
         auto plan = runtime_plan(record, paths, session, adb.port(), qmp.port(), camera.port());
         if (inspect_pe(plan.camera).machine != 0xaa64) throw std::runtime_error("Missing native ARM64 camera bridge.");
         write_status(log, "WAITING", "Booting Android; waiting for its independent ADB transport");
+        QemuWindowIcons icons;
         PrivateChild qemu(plan.qemu, plan.cwd, plan.arguments, plan.environment, log / "qemu.log");
         auto qemuOwner = describe_owned_process(qemu.pid(), plan.qemu, owner.instanceUuid, paths.channel, "qemu");
         update(paths, id, session, [&](json& current) {
@@ -283,6 +308,7 @@ void supervise_instance(const ManagerPaths& paths, const std::string& id, const 
         };
         bool ready = false; auto deadline = GetTickCount64() + 240000;
         while (qemu.running() && GetTickCount64() < deadline) {
+            icons.update(qemu.pid());
             try { if (shell("getprop sys.boot_completed") == "1") { ready = true; break; } }
             catch (const std::exception& error) { std::ofstream output(log / "setup.log", std::ios::app); output << "Waiting: " << error.what() << '\n'; }
             Sleep(500);
@@ -315,6 +341,7 @@ void supervise_instance(const ManagerPaths& paths, const std::string& id, const 
         auto verified = "Android " + shell("getprop ro.build.version.release") + " | Linux " + shell("uname -r") + " | SDL / VirGL / 120 Hz | HOME visible";
         update(paths, id, session, [&](json& current) { current["lifecycle"] = "running"; });
         write_status(log, "READY", "System started successfully - opening Android", verified);
+        icons.update(qemu.pid());
         while (qemu.running()) Sleep(250);
         if (qemu.exit_code()) failure = "QEMU exited with code " + std::to_string(qemu.exit_code()) + ". See qemu.log.";
         // The exact bridge and its camera lease are stopped before storage is

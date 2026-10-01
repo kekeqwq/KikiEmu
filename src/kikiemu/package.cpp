@@ -37,11 +37,18 @@ Held pin(const fs::path& path, DWORD access, bool directory = false) {
     auto result = std::make_unique<Handle>(CreateFileW(extended(path).c_str(), access,
         directory ? FILE_SHARE_READ | FILE_SHARE_WRITE : FILE_SHARE_READ, nullptr, OPEN_EXISTING,
         FILE_FLAG_OPEN_REPARSE_POINT | (directory ? FILE_FLAG_BACKUP_SEMANTICS : 0), nullptr));
+    if (result->value == INVALID_HANDLE_VALUE) {
+        const auto error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+            throw std::runtime_error("Package/staging path does not exist: " + utf8(path.wstring()) + ". Check --system and its parent folders.");
+        throw std::runtime_error("Could not open package/staging path: " + utf8(path.wstring()) +
+            " (Windows error " + std::to_string(error) + "). Close programs holding the file and check permissions.");
+    }
     BY_HANDLE_FILE_INFORMATION info{};
-    if (result->value == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(result->value, &info) ||
+    if (!GetFileInformationByHandle(result->value, &info) ||
         (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ||
         bool(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != directory)
-        throw std::runtime_error("Package/staging path is redirected or cannot be pinned.");
+        throw std::runtime_error("Package/staging path is redirected or has the wrong file type: " + utf8(path.wstring()) + ".");
     return result;
 }
 std::vector<Held> parents(const fs::path& path, bool createMissing = false) {
@@ -233,11 +240,12 @@ void validate_source_lock(const json& value) {
         state.projects != value.at("aosp").at("projectCount").get<uint64_t>())
         throw std::runtime_error("AOSP source manifest is unsafe, unpinned or inconsistent.");
 }
-SystemPackage read_system_package(const fs::path& archiveFile, const fs::path& newStagingDirectory) {
+SystemPackage read_system_package(const fs::path& archiveFile, const fs::path& newStagingDirectory, const Progress& progress) {
     const auto file = normalize_directory(archiveFile.wstring()), stage = normalize_directory(newStagingDirectory.wstring());
     if (file.root_name().wstring().size() != 2 || stage.root_name().wstring().size() != 2 || fs::exists(stage))
         throw std::runtime_error("System ZIP/staging must use local paths and a NEW staging directory.");
     auto sourceParents = parents(file); auto source = pin(file, GENERIC_READ | FILE_READ_ATTRIBUTES);
+    report(progress, "Validating system ZIP: " + utf8(file.wstring()));
     LARGE_INTEGER length{};
     if (!GetFileSizeEx(source->value, &length) || length.QuadPart <= 0 || uint64_t(length.QuadPart) > maxTotal)
         throw std::runtime_error("System ZIP exceeds its supported size limit.");
@@ -262,6 +270,7 @@ SystemPackage read_system_package(const fs::path& archiveFile, const fs::path& n
             throw std::runtime_error("Declared ZIP file length/allowlist mismatch.");
     }
     auto stageParents = parents(stage, true);
+    report(progress, "Extracting verified package entries into a new temporary staging directory.");
     if (!CreateDirectoryW(extended(stage).c_str(), nullptr)) throw std::runtime_error("Could not create a NEW owned package staging directory.");
     auto stageRoot = pin(stage, FILE_READ_ATTRIBUTES, true);
     GUID stageUuid{}; wchar_t uuidText[40];
@@ -278,7 +287,8 @@ SystemPackage read_system_package(const fs::path& archiveFile, const fs::path& n
     }
     Reader reader(file); archive_entry* entry = nullptr; int status; std::array<char, 65536> buffer;
     while ((status = archive_read_next_header(reader.value, &entry)) == ARCHIVE_OK) {
-        auto name = name_of(entry); uint64_t expected = lengths.at(name), written = 0;
+        auto name = name_of(entry); uint64_t expected = lengths.at(name), written = 0, reported = 0;
+        report(progress, "Extracting " + name + " (" + std::to_string(expected) + " bytes).");
         Handle output(CreateFileW(extended(stage / utf16(name)).c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
                                   CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr));
         if (output.value == INVALID_HANDLE_VALUE) throw std::runtime_error("Could not write a NEW owned package staging file " + name +
@@ -290,10 +300,15 @@ SystemPackage read_system_package(const fs::path& archiveFile, const fs::path& n
             if (!WriteFile(output.value, buffer.data(), static_cast<DWORD>(count), &saved, nullptr) || saved != count)
                 throw std::runtime_error("Package staging write failed.");
             written += static_cast<uint64_t>(count);
+            if (written - reported >= (64ULL << 20) || written == expected) {
+                report(progress, "  " + name + ": " + std::to_string(written * 100 / expected) + "%");
+                reported = written;
+            }
         }
         if (count < 0 || written != expected || !FlushFileBuffers(output.value)) throw std::runtime_error("ZIP CRC/length/staging flush verification failed.");
     }
     if (status != ARCHIVE_EOF) throw std::runtime_error("System ZIP extraction failed.");
+    report(progress, "Checking extracted payload SHA-256 and pinned source-lock/kernel identity.");
     for (const auto& [name, item] : declared) if (!item.is_null() && sha256(stage / utf16(name)) != item.at("sha256").get<std::string>())
         throw std::runtime_error("Staged package file SHA-256 mismatch.");
     std::ifstream lockStream(stage / "provenance/source-lock.json", std::ios::binary);
@@ -320,7 +335,11 @@ SystemPackage read_system_package(const fs::path& archiveFile, const fs::path& n
         // All reader/file/child-directory handles inside the try have closed.
         // Remove ONLY this freshly created stage by the pinned owner identity;
         // an identity mismatch retains it rather than following another path.
-        delete_storage(owner, {file}, [] {});
+        try { delete_storage(owner, {file}, [] {}); }
+        catch (const std::exception& cleanup) {
+            throw std::runtime_error("Package extraction/validation failed: " + exception_message(original) +
+                ". Temporary cleanup also failed: " + cleanup.what() + ". Staging kept at " + utf8(stage.wstring()));
+        }
         std::rethrow_exception(original);
     }
 }

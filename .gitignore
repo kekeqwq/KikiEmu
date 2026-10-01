@@ -58,6 +58,11 @@
 !/tools/build_kikiemu_core.ps1
 !/tools/build_receipt.ps1
 !/tools/build_kikiemu_setup.ps1
+!/tools/collect_release_sources.ps1
+!/tools/package_launcher_sources.ps1
+!/tools/relink_launcher.ps1
+!/tools/publish_alpha_release.ps1
+!/RELEASE_0_1_ALPHA.md
 !/tools/build_kikiemu_icon.ps1
 !/tools/check_gpt_guest_storage.ps1
 !/tools/export_qemu_runtime.ps1

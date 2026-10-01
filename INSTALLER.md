@@ -74,4 +74,8 @@ closure includes Apache-2.0 OpenSSL; see [LICENSE_NOTICE.md](LICENSE_NOTICE.md)
 and the complete [GPLv3 terms](LICENSES/GPL-3.0.txt). The installer presents
 these selected terms and retains GPLv2/source and dependency notices too.
 Candidate compilation is not approval to publish an incomplete license/source
-set. Real user installer acceptance and clean system acceptance remain gates.
+set. For0.1 Alpha the user authorized mainline/publication after their successful
+instance creation; the final installer is still NOT executed by the agent.
+The separate release source kit includes exact dependency sources and relinkable
+application objects; [RELEASE_0_1_ALPHA.md](RELEASE_0_1_ALPHA.md) records the
+actual system regression and remaining user-owned installer acceptance scope.

@@ -3,6 +3,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <bcrypt.h>
+#include <tlhelp32.h>
 
 #include "runtime.hpp"
 #include <algorithm>
@@ -248,5 +249,129 @@ void verify_qemu_binding(const json& binding) {
     auto current = inspect_qemu(fs::path(utf16(binding.at("binDirectory").get<std::string>())));
     if (current != binding)
         throw std::runtime_error("The configured QEMU runtime changed. Use set --qemu to validate it again.");
+}
+
+namespace {
+void plain_runtime_path(const fs::path& path, bool directory) {
+    const auto attributes = GetFileAttributesW(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT) ||
+        bool(attributes & FILE_ATTRIBUTE_DIRECTORY) != directory)
+        throw std::runtime_error("Missing, redirected or invalid runtime preparation path: " + utf8(path.wstring()));
+}
+void runtime_not_in_use(const fs::path& bin) {
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) throw std::runtime_error("Could not check whether QEMU is in use.");
+    struct Close { HANDLE value; ~Close() { CloseHandle(value); } } close{snapshot};
+    PROCESSENTRY32W entry{}; entry.dwSize = sizeof(entry);
+    if (!Process32FirstW(snapshot, &entry)) throw std::runtime_error("Could not enumerate running QEMU processes.");
+    do {
+        const auto name = lower(utf8(entry.szExeFile));
+        if (name != "qemu-system-aarch64.exe" && name != "qemu-img.exe" && name != "qemu-io.exe") continue;
+        HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, entry.th32ProcessID);
+        if (!process) {
+            if (GetLastError() == ERROR_INVALID_PARAMETER) continue; // Already exited.
+            throw std::runtime_error("Cannot verify a QEMU process identity. Close QEMU before runtime preparation.");
+        }
+        Close held{process};
+        wchar_t executable[32768]; DWORD length = std::size(executable);
+        if (!QueryFullProcessImageNameW(process, 0, executable, &length)) {
+            if (WaitForSingleObject(process, 0) == WAIT_OBJECT_0) continue;
+            throw std::runtime_error("Cannot verify a running QEMU path. Close QEMU before runtime preparation.");
+        }
+        if (lower(utf8(fs::path(executable).parent_path().wstring())) == lower(utf8(bin.wstring())))
+            throw std::runtime_error("This QEMU bin is in use. Close its processes before preparing missing dependencies.");
+    } while (Process32NextW(snapshot, &entry));
+    if (GetLastError() != ERROR_NO_MORE_FILES) throw std::runtime_error("QEMU process enumeration was interrupted.");
+}
+struct RuntimeCopy { fs::path source, destination; std::string hash; };
+}
+json prepare_qemu(const fs::path& directory, const Progress& progress) {
+    auto bin = normalize_directory(directory.wstring());
+    for (const auto* name : {"qemu-system-aarch64.exe", "qemu-img.exe", "qemu-io.exe"}) {
+        if (!fs::is_regular_file(bin / name))
+            throw std::runtime_error("QEMU bin is missing " + std::string(name) + " at " + utf8(bin.wstring()) +
+                ". Compile QEMU first using build.ps1 from the mainline README; select its bin directory, not an EXE.");
+    }
+    report(progress, "Checking QEMU EXEs, private DLLs and ROMs: " + utf8(bin.wstring()));
+    try {
+        auto binding = inspect_qemu(bin);
+        report(progress, "QEMU runtime is ready. No files changed.");
+        return binding;
+    } catch (const std::exception& error) {
+        const std::string message = error.what();
+        if (!message.starts_with("QEMU bin is missing a private DLL:") &&
+            message != "QEMU bin is missing its private roms directory." && message != "QEMU roms directory is empty.") throw;
+        report(progress, "QEMU runtime preparation required: " + message);
+    }
+    plain_runtime_path(bin, true);
+    runtime_not_in_use(bin);
+    const auto root = bin.parent_path(), receipt = root / ".kiki-qemu-build/state.json";
+    if (!fs::is_regular_file(receipt))
+        throw std::runtime_error("QEMU EXEs exist but runtime dependencies are incomplete and the build receipt is missing: " +
+            utf8(receipt.wstring()) + ". Keep bin in the QEMU checkout built with build.ps1, or provide a complete private runtime.");
+    plain_runtime_path(receipt.parent_path(), true); plain_runtime_path(receipt, false);
+    if (fs::file_size(receipt) > 1048576) throw std::runtime_error("QEMU build receipt is oversized.");
+    std::ifstream input(receipt, std::ios::binary);
+    auto state = parse_json_document(std::string((std::istreambuf_iterator<char>(input)), {}));
+    if (state.value("Version", 0) != 1 || !state.contains("Source") || !state.contains("Msys2") ||
+        !state.at("Source").is_string() || !state.at("Msys2").is_string() ||
+        !fs::equivalent(normalize_directory(utf16(state.at("Source").get<std::string>())), root))
+        throw std::runtime_error("QEMU build receipt does not describe this checkout. No files changed.");
+    const auto dependencies = normalize_directory(utf16(state.at("Msys2").get<std::string>())) / "clangarm64/bin";
+    const auto bios = root / "pc-bios", roms = bin / "roms";
+    plain_runtime_path(dependencies, true); plain_runtime_path(bios, true);
+    auto exported = inspect_qemu(bin, {dependencies}); // Static only; never starts QEMU.
+    std::vector<RuntimeCopy> copies;
+    auto add = [&](const fs::path& source, const fs::path& destination, const std::string& expected) {
+        plain_runtime_path(source, false);
+        if (fs::exists(destination)) {
+            plain_runtime_path(destination, false);
+            if (sha256(destination) != expected)
+                throw std::runtime_error("Existing runtime file conflicts with the build source: " + utf8(destination.wstring()) + ". Nothing was overwritten.");
+        } else copies.push_back({source, destination, expected});
+    };
+    for (const auto& file : exported.at("files")) {
+        const auto source = fs::path(utf16(file.at("source").get<std::string>()));
+        const auto name = fs::path(utf16(file.at("name").get<std::string>()));
+        if (source.parent_path() != bin && source.parent_path() != fs::canonical(dependencies))
+            throw std::runtime_error("Linked/external runtime dependency refused: " + utf8(source.wstring()));
+        add(source, bin / name, file.at("sha256").get<std::string>());
+    }
+    if (fs::exists(roms)) {
+        plain_runtime_path(roms, true);
+        for (const auto& entry : fs::directory_iterator(roms)) {
+            plain_runtime_path(entry.path(), false);
+            auto extension = lower(utf8(entry.path().extension().wstring()));
+            if (extension != ".bin" && extension != ".rom" && extension != ".fd" && extension != ".dtb")
+                throw std::runtime_error("Unexpected existing file in QEMU roms: " + utf8(entry.path().wstring()));
+            if (!fs::is_regular_file(bios / entry.path().filename()))
+                throw std::runtime_error("Existing ROM is not from the selected QEMU source: " + utf8(entry.path().wstring()));
+        }
+    }
+    size_t romCount = 0;
+    for (const auto& entry : fs::directory_iterator(bios)) {
+        auto extension = lower(utf8(entry.path().extension().wstring()));
+        if (extension != ".bin" && extension != ".rom" && extension != ".fd" && extension != ".dtb") continue;
+        ++romCount; add(entry.path(), roms / entry.path().filename(), sha256(entry.path()));
+    }
+    if (!romCount) throw std::runtime_error("No matching QEMU ROMs were found. No files changed.");
+    for (const auto& file : copies) {
+        if (sha256(file.source) != file.hash || fs::exists(file.destination))
+            throw std::runtime_error("Runtime source/destination changed during preparation. No files overwritten.");
+    }
+    runtime_not_in_use(bin);
+    if (!fs::exists(roms)) fs::create_directory(roms);
+    plain_runtime_path(roms, true);
+    report(progress, "Preparing " + std::to_string(copies.size()) + " missing DLL/ROM files from this build's sources.");
+    for (const auto& file : copies) {
+        plain_runtime_path(file.destination.parent_path(), true);
+        // Default copy_options::none refuses an existing destination.
+        if (!fs::copy_file(file.source, file.destination) || sha256(file.destination) != file.hash)
+            throw std::runtime_error("Runtime copy verification failed: " + utf8(file.destination.wstring()));
+        report(progress, "Prepared " + utf8(file.destination.filename().wstring()));
+    }
+    auto binding = inspect_qemu(bin); // No MSYS2 fallback survives in saved bindings.
+    report(progress, "QEMU runtime prepared and verified. EXEs were not replaced.");
+    return binding;
 }
 } // namespace kiki

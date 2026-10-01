@@ -134,7 +134,8 @@ static void check_image_header(const std::string& role, const fs::path& file) {
 }
 json install_disk(const json& binding, const fs::path& newDirectory, uint64_t totalBytes,
                   const std::map<std::string, fs::path>& payloads, uint64_t minimumDataBytes,
-                  const std::map<std::string, std::string>& manifestHashes) {
+                  const std::map<std::string, std::string>& manifestHashes, const Progress& progress) {
+    report(progress, "Validating QEMU image tools and installation payloads.");
     verify_qemu_binding(binding);
     auto directory = normalize_directory(newDirectory.wstring());
     if (fs::exists(directory)) throw std::runtime_error("Installation destination already exists; no files were changed.");
@@ -152,6 +153,7 @@ json install_disk(const json& binding, const fs::path& newDirectory, uint64_t to
     auto layout = plan_disk(totalBytes, lengths, minimumDataBytes);
     auto bin = fs::path(utf16(binding.at("binDirectory").get<std::string>()));
     fs::create_directories(directory);
+    report(progress, "Creating a " + std::to_string(totalBytes >> 30) + " GiB dynamic disk (no preallocation).");
     auto tool = [&](const wchar_t* name, const std::vector<std::wstring>& args) {
         auto result = image_tool(bin / name, directory, args);
         if (result.exitCode) throw std::runtime_error("Image tool failed: " + result.output);
@@ -178,6 +180,7 @@ json install_disk(const json& binding, const fs::path& newDirectory, uint64_t to
                                      ". Installation was not registered; check the required image-tool patches.");
     };
     auto table = entries(layout);
+    report(progress, "Writing and verifying primary/backup GPT partition tables.");
     write_and_verify(0, primary_table(layout, table));
     auto backupHeader = header(layout, true, crc32(table.data(), table.size()));
     auto backup = table; backup.insert(backup.end(), backupHeader.begin(), backupHeader.end());
@@ -192,16 +195,20 @@ json install_disk(const json& binding, const fs::path& newDirectory, uint64_t to
             throw std::runtime_error("Installation input changed before import; instance was not registered.");
         std::ifstream stream(found->second, std::ios::binary);
         uint64_t written = 0;
+        report(progress, "Importing " + partition.name + " with disk readback verification.");
         while (written < lengths.at(partition.name)) {
             size_t count = static_cast<size_t>(std::min<uint64_t>(16 * MiB, lengths.at(partition.name) - written));
             std::vector<unsigned char> bytes(count);
             if (!stream.read(reinterpret_cast<char*>(bytes.data()), bytes.size())) throw std::runtime_error("Could not read the installation payload.");
             write_and_verify(partition.offsetBytes + written, bytes);
             written += bytes.size();
+            report(progress, "  " + partition.name + ": " + std::to_string(written * 100 / lengths.at(partition.name)) + "% (" +
+                std::to_string(written) + "/" + std::to_string(lengths.at(partition.name)) + " bytes)");
         }
         if (sha256(found->second) != expected) throw std::runtime_error("Installation input changed during import.");
         record["payloads"].push_back({{"role", partition.name}, {"bytes", written}, {"sha256", expected}});
     }
+    report(progress, "Checking QCOW2 consistency and extracting the installed boot payload.");
     tool(L"qemu-img.exe", {L"check", L"-f", L"qcow2", L"phone.qcow2"});
     const auto& bootPartition = layout.partitions.front();
     tool(L"qemu-img.exe", {L"dd", L"-f", L"qcow2", L"-O", L"raw", L"if=phone.qcow2", L"of=installed-boot.bin",
@@ -209,6 +216,7 @@ json install_disk(const json& binding, const fs::path& newDirectory, uint64_t to
                            L"count=" + std::to_wstring((bootPartition.offsetBytes + lengths.at("boot")) / 4096)});
     if (sha256(directory / "installed-boot.bin") != sha256(payloads.at("boot")))
         throw std::runtime_error("Installed boot partition identity changed before cache generation.");
+    report(progress, "Deriving the kernel/initramfs boot cache from the installed disk.");
     record["directBoot"] = derive_boot_cache(directory / "installed-boot.bin", directory / "boot");
     fs::remove(directory / "installed-boot.bin");
     record["diskFile"] = "phone.qcow2";
