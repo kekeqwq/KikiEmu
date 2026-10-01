@@ -28,6 +28,7 @@
 #include <iostream>
 #include <stdexcept>
 #include "wire_fixture.hpp"
+#include "system_fixture.hpp"
 
 static unsigned passed = 0;
 static void check(bool condition, const char* name) {
@@ -604,6 +605,40 @@ int wmain(int argc, wchar_t** argv) {
                 {"resources", {{"cpus", uint32_t(8)}, {"memoryBytes", 4ULL << 30}}}}}};
         auto plan = runtime_plan(launchFixture, manager, new_instance_uuid(), 60001, 60002, 60003);
         const std::string homeWindow = "  mCurrentFocus=Window{abc123 u0 com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher}\n";
+        const auto internalRoot = temp / "internal-system-fixture", internalApp = temp / "internal-app";
+        auto rootFixtureOwner = createdOwner; rootFixtureOwner.directory = internalRoot;
+        auto instanceFixtureOwner = createdOwner; instanceFixtureOwner.directory = internalRoot / "instance";
+        instanceFixtureOwner.instanceUuid = new_instance_uuid();
+        nlohmann::json internalFixture{{"fixtureVersion", 1}, {"purpose", "internal-clean-system-regression"},
+            {"rootOwner", storage_identity_json(rootFixtureOwner)}, {"instanceOwner", storage_identity_json(instanceFixtureOwner)},
+            {"id", "01"}, {"appRoot", utf8(internalApp.wstring())}, {"archiveSha256", std::string(64, 'a')}, {"totalBytes", 32ULL << 30}};
+        auto validatedFixture = kiki_test::validate_system_fixture(internalFixture, internalRoot, internalApp);
+        check(validatedFixture.manager.registryRoot == internalRoot / "registry" && validatedFixture.totalBytes == 32ULL << 30,
+              "internal real-system runner resolves only its separate test registry and immutable capacity");
+        for (const auto& field : {"purpose", "id", "appRoot", "archiveSha256"}) {
+            auto wrong = internalFixture; wrong[field] = "foreign";
+            rejects([&] { kiki_test::validate_system_fixture(wrong, internalRoot, internalApp); }, "internal system runner accepted foreign marker metadata");
+        }
+        for (const auto& field : {"rootOwner", "instanceOwner"}) {
+            auto wrong = internalFixture; wrong[field]["channel"] = "dev";
+            rejects([&] { kiki_test::validate_system_fixture(wrong, internalRoot, internalApp); }, "internal runner accepted foreign fixture channel");
+        }
+        auto wrongFixture = internalFixture; wrongFixture["totalBytes"] = int64_t(32ULL << 30);
+        rejects([&] { kiki_test::validate_system_fixture(wrongFixture, internalRoot, internalApp); }, "signed internal capacity accepted");
+        wrongFixture = internalFixture; wrongFixture["totalBytes"] = (32ULL << 30) + 1;
+        rejects([&] { kiki_test::validate_system_fixture(wrongFixture, internalRoot, internalApp); }, "unaligned internal capacity accepted");
+        wrongFixture = internalFixture; wrongFixture["rootOwner"]["instanceUuid"] = instanceFixtureOwner.instanceUuid;
+        rejects([&] { kiki_test::validate_system_fixture(wrongFixture, internalRoot, internalApp); }, "internal root adopted its child instance UUID");
+        rejects([&] { kiki_test::validate_system_fixture(internalFixture, internalRoot / "other", internalApp); }, "internal runner adopted a different root");
+        rejects([&] { kiki_test::validate_system_fixture(internalFixture, internalRoot, internalApp / "other"); }, "internal runner adopted a different executable directory");
+        nlohmann::json fixtureRegistration{{"owner", internalFixture.at("instanceOwner")}, {"uuid", instanceFixtureOwner.instanceUuid},
+            {"immutableSource", {{"archiveSha256", std::string(64, 'a')}, {"layout", {{"totalBytes", 32ULL << 30}}}}}};
+        kiki_test::verify_system_fixture_registration(validatedFixture, fixtureRegistration);
+        check(true, "internal runner binds the registered owner and actual imported package identity");
+        for (const auto& field : {"archiveSha256", "layout"}) {
+            auto wrong = fixtureRegistration; wrong["immutableSource"][field] = nullptr;
+            rejects([&] { kiki_test::verify_system_fixture_registration(validatedFixture, wrong); }, "internal runner accepted a different imported package/layout");
+        }
         const std::string homeLayers = "SurfaceView\ncom.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher#23\n";
         check(launcher_display_ready(homeWindow, homeLayers, "  mActiveRenderFrameRate=120.0\n"),
               "ready gate accepts exact WindowManager Home focus plus actual Home layer and render 120");

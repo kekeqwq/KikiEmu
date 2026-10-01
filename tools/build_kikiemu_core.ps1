@@ -75,6 +75,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Native core-unit-test build failed.' }
 $diskPrototype = Join-Path $OutputDirectory 'kikiemu-disk-prototype.exe'
 & $compiler @flags @objects (Join-Path $repoRoot 'src/kikiemu/disk_prototype.cpp') -o $diskPrototype @libs
 if ($LASTEXITCODE -ne 0) { throw 'Native system-disk-prototype build failed.' }
+$systemRegression = Join-Path $OutputDirectory 'kikiemu-system-regression.exe'
+& $compiler @flags @objects (Join-Path $repoRoot 'tests/system_regression.cpp') -o $systemRegression @libs
+if ($LASTEXITCODE -ne 0) { throw 'Native internal real-system-regression runner build failed.' }
 Write-Output "Built native ARM64 manager component and development tools: $OutputDirectory"
 Write-Output 'This does not build/install setup.exe, register an instance, change PATH or start QEMU.'
 if ($RunUnitTests) {

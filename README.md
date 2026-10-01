@@ -119,11 +119,13 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH  # 仅当前开发终端，�
 
 运行管理源码为每次启动建立独立会话 UUID、ADB/QMP/相机回环端口和日志目录；进程先暂停创建、登记精确身份后才执行。正式窗口标题为 `KikiEmu`，开发计划为 `QEMU/Dev`，控制和删除不依赖标题。私有 ADB wire 直接连登记的客机，不使用全局 5037 服务、默认设备或宿主 ADB key；单次命令接口为 `kikiemu adb --id 01 --shell "getprop ro.serialno"`，暂不提供交互式 shell。原生启动配方沿用 SDL/VirGL/120 Hz、8 CPU/4 GiB、1003×1556、不 Grab 的基线，不对宿主显示/键盘/音频设定作修改。
 
-强制删除已额外验证运行中的 supervisor 持有真实 storage lease 的情况：只读核验和锁定原目录身份，停止该实例后才升级删除权限；替换路径或未释放锁仍拒绝。251 项内部检查包括进程/端口隔离、私有 shell-v2 的分段数据/校验/超时/错误身份和持锁实例删除，并新增安装运行期互斥、完整 PATH 精确分段/去重/长度检查。所有安装入口持有 `install.lock` 共享 lease，setup/卸载必须先取得独占 lease，不能覆盖运行中的启动器，也不自动杀实例；卸载保留实例记录与磁盘。公开安装器/CLI 的最终用户验收仍由用户执行。
+强制删除已额外验证运行中的 supervisor 持有真实 storage lease 的情况：只读核验和锁定原目录身份，停止该实例后才升级删除权限；替换路径或未释放锁仍拒绝。当前 275 项隔离内部检查包括进程/端口隔离、私有 shell-v2 的分段数据/校验/超时/错误身份和持锁实例删除，以及安装运行期互斥、完整 PATH 精确分段/去重/长度检查、真实 HOME 就绪解析和专用系统测试目录隔离；额外传入 producer 非可启动 ZIP fixture 时另有一项交叉读取检查。所有安装入口持有 `install.lock` 共享 lease，setup/卸载必须先取得独占 lease，不能覆盖运行中的启动器，也不自动杀实例；卸载保留实例记录与磁盘。公开安装器/CLI 的最终用户验收仍由用户执行。
 
 共用合同从设备仓库 commit `5cfd0a94c1b267661d2ae96bdc3875365ad686cf` 固定引入，见 [PIN.json](src/kikiemu/contracts/PIN.json)；构建时核对三个 JSON 文件的 SHA-256，再嵌入本机程序。ZIP/ZIP64 只允许规定文件、store/deflate、普通文件及一致的 local/central 名称；拒绝 SFX、重复/截断/NUL/路径跳转、隐藏附加文件、未知角色、开发身份或错误 ABI。长度、哈希、AOSP XML 精确项目提交、4K ARM64 boot/gzip 和 raw EROFS 再作语义核验，禁止执行包内代码。这里的测试 ZIP 是明确标记的非可启动假数据，绝不是用户需要的系统包。
 
-原生组件构建依赖 MSYS2 CLANGARM64 的 clang、windres、nlohmann-json、libarchive、expat 及其依赖；运行 `tools/build_kikiemu_core.ps1 -RunUnitTests`。共享核心编译一次供两个产品入口和三个内部工具复用；产品入口嵌入原图标、版本、非提权和 DPI/长路径 manifest。libarchive/expat 静态链接；MSYS2 的 libarchive 仍导入 zlib，构建脚本将原生 `zlib1.dll` 私有复制在 EXE 旁，不依赖用户 MSYS2/PATH。相机桥接单独由 `tools/build_surface_camera_bridge.ps1` 构建，使用 Windows 官方 OneCore 导入库和静态 C++ runtime；只在实际打开相机时持有跨实例占用锁，关闭相机后释放。最终发行必须补齐静态/动态依赖的原许可和源码义务审计。
+原生组件构建依赖 MSYS2 CLANGARM64 的 clang、windres、nlohmann-json、libarchive、expat 及其依赖；运行 `tools/build_kikiemu_core.ps1 -RunUnitTests`。共享核心编译一次供两个产品入口和四个内部工具复用；产品入口嵌入原图标、版本、非提权和 DPI/长路径 manifest。libarchive/expat 静态链接；MSYS2 的 libarchive 仍导入 zlib，构建脚本将原生 `zlib1.dll` 私有复制在 EXE 旁，不依赖用户 MSYS2/PATH。相机桥接单独由 `tools/build_surface_camera_bridge.ps1` 构建，使用 Windows 官方 OneCore 导入库和静态 C++ runtime；只在实际打开相机时持有跨实例占用锁，关闭相机后释放。最终发行必须补齐静态/动态依赖的原许可和源码义务审计。
+
+开发侧新增 [干净包真实系统测试入口与证据清单](tests/SYSTEM_REGRESSION.md)：`kikiemu-system-regression.exe` 只在新建、独立所有权的内部目录读取真正的发行 ZIP，复用生产 reader/磁盘/supervisor/private ADB 完整配方，支持实际系统启动、限定 shell、正常关机和持久化复测，不调用公开 CLI/desktop，不触碰用户安装的 registry/PATH。该工具不进 setup.exe；编译或内部 fixture 检查通过不等于实际系统启动成功，更不冒充用户安装器验收。
 
 32 GiB 原型磁盘启动前约占1.16 GiB；GPT、boot/system/vendor 逐块读回校验及 QCOW2 检查通过，没有 backing file 或旧 userdata。首次系统启动发现上游 init 的 boot UUID 分类漏掉 virtio-blk，已在设备仓库追踪最小修补并重建。修正后单盘实际启动进入 SDL/VirGL/120Hz 桌面，剩余容量首次格式化为 F2FS，跨正常关机/重启的数据标记保持不变。
 
