@@ -69,7 +69,7 @@ are still user-owned tests, not claimed as completed by this check.
 After the build completes, remain in the **same QEMU checkout root** and run:
 
 ```powershell
-Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/feat/release-0_1-alpha/prepare.ps1' -OutFile ./prepare.ps1
+Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/51b272b92f33ca8dbf2740d80fd22d0df80121f3/prepare.ps1' -OutFile ./prepare.ps1
 ./prepare.ps1 --msys2 'C:\msys64'
 ```
 
