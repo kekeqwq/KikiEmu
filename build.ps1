@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 <#
 .SYNOPSIS
-Build the pinned KikiEmu-compatible QEMU in a user's upstream QEMU checkout.
+Build QEMU with KikiEmu's fixed patches in a user's upstream QEMU checkout.
 .EXAMPLE
 ./build.ps1 --msys2 'C:\msys64'
 .EXAMPLE
@@ -184,7 +184,7 @@ function Initialize-KikiPatchState {
     param([string]$Git, [string]$Source, [string]$MsysRoot, [System.Collections.IDictionary]$Recipe)
     $head = Invoke-KikiBuildProcess $Git @('-C', $Source, 'rev-parse', 'HEAD') -Capture
     if ($head -ne $Recipe.SourceRevision) {
-        throw "Wrong QEMU revision: $head. Use git checkout --detach $($Recipe.SourceRevision) in a clean checkout first."
+        Write-Warning "QEMU revision $head has not been verified with these patches. Patching or compilation may fail. Recommended revision: $($Recipe.SourceRevision). Continuing with your current checkout."
     }
     # Staged user changes must not be mistaken for this builder's patches.
     Invoke-KikiBuildProcess $Git @('-C', $Source, 'diff', '--cached', '--quiet', '--') -Capture | Out-Null
@@ -196,6 +196,13 @@ function Initialize-KikiPatchState {
         Assert-KikiPlainDirectory $cache
         if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { throw "Unmanaged build cache: $cache. Use a new clean checkout." }
         $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json -AsHashtable
+        # Record the user's actual revision, not an enforced recommended pin.
+        # Old receipts came from the former pinned builder, so their HEAD is
+        # known. Do not reuse already patched build state with another HEAD.
+        $previousHead = if ($state.Contains('QemuHead')) { $state.QemuHead } else { $Recipe.SourceRevision }
+        if ($previousHead -ne $head) {
+            throw 'QEMU HEAD changed since this incremental build was prepared. Use a new checkout for that revision; no source or artifacts were reset.'
+        }
         if ($state.Version -ne 1 -or $state.Source -ne $Source -or $state.Msys2 -ne $MsysRoot -or
             $state.RecipeHash -ne $recipeHash -or $state.DiffHash -ne $diffHash -or
             ($state.Applied -isnot [long] -and $state.Applied -isnot [int]) -or
@@ -209,11 +216,11 @@ function Initialize-KikiPatchState {
             Assert-KikiPlainDirectory $bin
             if (@(Get-ChildItem -LiteralPath $bin -Force).Count -ne 0) { throw 'An unmanaged bin directory already exists. No build files were overwritten.' }
         }
-        $state = [ordered]@{ Version = 1; Source = $Source; Msys2 = $MsysRoot; RecipeHash = $recipeHash; Applied = 0; DiffHash = $diffHash }
+        $state = [ordered]@{ Version = 1; Source = $Source; Msys2 = $MsysRoot; RecipeHash = $recipeHash; QemuHead = $head; Applied = 0; DiffHash = $diffHash }
         [void][IO.Directory]::CreateDirectory($cache)
         Save-KikiPatchState $statePath $state
     }
-    [pscustomobject]@{ Directory = $cache; Path = $statePath; State = $state }
+    [pscustomobject]@{ Directory = $cache; Path = $statePath; State = $state; QemuHead = $head }
 }
 
 function Assert-KikiPlainDirectory {
@@ -282,7 +289,7 @@ function Invoke-KikiQemuBuild {
     $recipe = Get-KikiQemuRecipe
     $receipt = Initialize-KikiPatchState $git $source $root $recipe
     $environment = Get-KikiMsysEnvironment $root $source
-    Write-Host "QEMU revision: $($recipe.SourceRevision)"
+    Write-Host "QEMU revision: $($receipt.QemuHead)"
     Write-Host "MSYS2: $root (CLANGARM64); build directory: $source\bin; jobs: $JobCount"
     Ensure-KikiBuildPackages $bash $environment $recipe.Packages
     $patchFiles = @(Get-KikiPatchFiles $receipt.Directory $recipe)

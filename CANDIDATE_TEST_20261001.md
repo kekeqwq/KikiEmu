@@ -161,7 +161,7 @@ recorded above; the two fixtures and native candidates are not interchangeable.
 
 - [User guide](QUICK_START.md): create/list/default, resource/QEMU settings,
   start, scoped ADB, explicit force-delete and uninstall semantics.
-- [QEMU build guide](QEMU_BUILD.md): upstream QEMU only, pinned revision,
+- [QEMU build guide](QEMU_BUILD.md): upstream QEMU only, recommended verified revision,
   standalone PowerShell download, MSYS2 package checks and four fixed patches.
   This new build-only entry leaves output in the checkout's bin; its actual
   user build test and any runtime deployment follow-up are still pending.

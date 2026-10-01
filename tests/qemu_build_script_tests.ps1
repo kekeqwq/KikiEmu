@@ -117,11 +117,31 @@ try {
     [IO.File]::WriteAllText((Join-Path $source 'seed.txt'), "user edit`n")
     Reject { Initialize-KikiPatchState $git $source 'C:\fixture-msys2' $fixtureRecipe } 'changed outside' 'unrelated tracked edits preserved'
     Check ((Get-Content (Join-Path $source 'seed.txt') -Raw) -eq "user edit`n") 'no reset or overwrite'
-    $badRevision = $fixtureRecipe | ConvertTo-Json -Depth 8 | ConvertFrom-Json -AsHashtable
-    $badRevision.SourceRevision = '0000000000000000000000000000000000000000'
-    Reject { Initialize-KikiPatchState $git $source 'C:\fixture-msys2' $badRevision } 'Wrong QEMU revision' 'wrong HEAD refused'
     Invoke-KikiBuildProcess $git @('-C', $source, 'add', 'seed.txt') -Capture | Out-Null
     Reject { Initialize-KikiPatchState $git $source 'C:\fixture-msys2' $fixtureRecipe } 'Command failed' 'staged edits refused'
+
+    # A different upstream commit is a warning, not a pin violation. Exercise
+    # real patch application after initialization on an unverified revision.
+    $unverifiedSource = Join-Path $scratch 'unverified-qemu'
+    Invoke-KikiBuildProcess $git @('clone', '--quiet', '--no-hardlinks', $source, $unverifiedSource) -Capture | Out-Null
+    $unverifiedRecipe = $fixtureRecipe | ConvertTo-Json -Depth 8 | ConvertFrom-Json -AsHashtable
+    $unverifiedRecipe.SourceRevision = '0000000000000000000000000000000000000000'
+    $records = @(Initialize-KikiPatchState $git $unverifiedSource 'C:\fixture-msys2' $unverifiedRecipe 3>&1)
+    $warnings = @($records | Where-Object { $_ -is [Management.Automation.WarningRecord] })
+    $unverifiedReceipt = @($records | Where-Object { $_ -isnot [Management.Automation.WarningRecord] })[0]
+    Check ($warnings.Count -eq 1 -and $warnings[0].Message -like '*Continuing with your current checkout*') 'unverified HEAD warns and continues'
+    Check ($unverifiedReceipt.State.QemuHead -eq $head) 'receipt records actual unverified HEAD'
+    [IO.File]::WriteAllText((Join-Path $unverifiedReceipt.Directory 'one.patch'), $patch1, [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $unverifiedReceipt.Directory 'two.patch'), $patch2, [Text.UTF8Encoding]::new($false))
+    $unverifiedFiles = @(Get-KikiPatchFiles $unverifiedReceipt.Directory $unverifiedRecipe)
+    Apply-KikiQemuPatches $git $unverifiedSource $unverifiedReceipt $unverifiedFiles
+    Check ((Get-Content (Join-Path $unverifiedSource 'seed.txt')) -eq 'three') 'patches proceed on unverified HEAD'
+    $unverifiedReceipt = Initialize-KikiPatchState $git $unverifiedSource 'C:\fixture-msys2' $unverifiedRecipe 3>$null
+    Check ($unverifiedReceipt.State.Applied -eq 2) 'unverified HEAD supports incremental rerun'
+    Invoke-KikiBuildProcess $git @('-C', $unverifiedSource, 'add', 'seed.txt') -Capture | Out-Null
+    Invoke-KikiBuildProcess $git @('-C', $unverifiedSource, '-c', 'user.name=KikiBuildTests', '-c', 'user.email=tests@example.invalid',
+        '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'different fixture HEAD') -Capture | Out-Null
+    Reject { Initialize-KikiPatchState $git $unverifiedSource 'C:\fixture-msys2' $unverifiedRecipe 3>$null } 'HEAD changed since' 'stale incremental state refused without forcing recommended commit'
     if ($VerifyRemotePatches) {
         $downloadCache = Join-Path $scratch 'remote-patches'
         [void][IO.Directory]::CreateDirectory($downloadCache)

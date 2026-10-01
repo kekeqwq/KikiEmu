@@ -107,13 +107,13 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH
 git clone https://gitlab.com/qemu-project/qemu.git ~/Repos/qemu
 if ($LASTEXITCODE -ne 0) { throw 'QEMU clone failed.' }
 cd ~/Repos/qemu
-git checkout --detach bde658eef6b38c45794bfd7ad4d2dd1b574e4694
-if ($LASTEXITCODE -ne 0) { throw 'QEMU checkout failed.' }
 Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/d614f2df791174d90943eaf02a3f3ca4a4d0e30a/build.ps1' -OutFile ./build.ps1
 ./build.ps1 --msys2 'C:\msys64'
 ```
 
 已经克隆 QEMU 则从 `cd` 开始；把 MSYS2 路径改成自己的安装路径，例如 `C:\msys2`。脚本检查已安装包，只安装缺失依赖，校验并应用固定四份补丁，再开始构建。默认并行度8，支持 `-Jobs 4`；也接受 PowerShell 风格的 `-Msys2`。
+
+建议但不强制使用已验证的 QEMU 提交 `bde658eef6b38c45794bfd7ad4d2dd1b574e4694`，需要时在构建前自行执行 `git checkout --detach bde658eef6b38c45794bfd7ad4d2dd1b574e4694`。其他提交只输出兼容性警告，仍会继续尝试补丁和构建，可能失败；脚本不会替用户切换或锁定提交。增量记录保存实际 HEAD，打过补丁后若换版本则使用新 checkout，不复用旧补丁／构建状态。
 
 产物直接留在 **QEMU 源码目录的 `bin`**，重复运行同一命令可增量构建。脚本仅处理依赖、补丁和构建，不移动、导出、清理或启动产物，不更改宿主的持久配置。实际构建交由用户先行测试；DLL/ROM 部署暂不加入脚本。独立英文说明见 [QEMU_BUILD.md](QEMU_BUILD.md)。上面历史开发流程中的 `.sh` 和内部导出工具不属于这个用户流程。
 

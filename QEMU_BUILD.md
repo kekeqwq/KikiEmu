@@ -13,8 +13,6 @@ QEMU requires a source/build path without spaces. `~/Repos/qemu` is an example.
 git clone https://gitlab.com/qemu-project/qemu.git ~/Repos/qemu
 if ($LASTEXITCODE -ne 0) { throw 'QEMU clone failed.' }
 cd ~/Repos/qemu
-git checkout --detach bde658eef6b38c45794bfd7ad4d2dd1b574e4694
-if ($LASTEXITCODE -ne 0) { throw 'QEMU checkout failed.' }
 
 Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/d614f2df791174d90943eaf02a3f3ca4a4d0e30a/build.ps1' -OutFile ./build.ps1
 ./build.ps1 --msys2 'C:\msys64'
@@ -23,6 +21,17 @@ Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/d614f2df791
 Already cloned? Start at `cd`, using your own checkout path. Replace
 `C:\msys64` with your MSYS2 installation, for example `C:\msys2`.
 `-Msys2` also works; parallelism defaults to 8 and can be changed with `-Jobs 4`.
+
+Recommended, **not required**: use the verified upstream commit
+`bde658eef6b38c45794bfd7ad4d2dd1b574e4694`. To opt into it before building:
+
+```powershell
+git checkout --detach bde658eef6b38c45794bfd7ad4d2dd1b574e4694
+```
+
+Other commits are allowed. The script prints a compatibility warning and
+continues with your current HEAD; the fixed patches or compilation may fail.
+It never checks out or locks an upstream revision for you.
 
 The script checks installed packages, skips installation when none are missing,
 installs only missing dependencies, verifies and applies the four fixed patches,
@@ -42,6 +51,8 @@ The original build output stays directly in **`<QEMU source>/bin`**:
 Rerun the same command for an incremental build. Verified patches and a build
 receipt stay in `.kiki-qemu-build/`. The script refuses unrelated source changes
 or an unmanaged nonempty `bin`; it does not reset source or clean old files.
+The receipt records your actual HEAD; use a new checkout if changing revisions
+after patching rather than reusing stale patch/build state.
 It does **not** copy/export DLLs or ROMs, move/package output, install KikiEmu,
 modify persistent host settings, or start QEMU. Actual build testing is yours.
 
