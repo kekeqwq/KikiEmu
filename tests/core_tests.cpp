@@ -603,6 +603,22 @@ int wmain(int argc, wchar_t** argv) {
             {"configuration", {{"qemu", {{"binDirectory", utf8(fakeBin.wstring())}}},
                 {"resources", {{"cpus", uint32_t(8)}, {"memoryBytes", 4ULL << 30}}}}}};
         auto plan = runtime_plan(launchFixture, manager, new_instance_uuid(), 60001, 60002, 60003);
+        const std::string homeWindow = "  mCurrentFocus=Window{abc123 u0 com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher}\n";
+        const std::string homeLayers = "SurfaceView\ncom.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher#23\n";
+        check(launcher_display_ready(homeWindow, homeLayers, "  mActiveRenderFrameRate=120.0\n"),
+              "ready gate accepts exact WindowManager Home focus plus actual Home layer and render 120");
+        check(launcher_display_ready("mCurrentFocus=Window{abc u0 com.android.launcher3/.uioverrides.QuickstepLauncher}\r\n",
+                                     homeLayers, "mActiveRenderFrameRate=120\r\n"), "ready gate supports canonical abbreviated component and CRLF");
+        check(!launcher_display_ready("ResumedActivity: ActivityRecord{abc u0 com.android.launcher3/.uioverrides.QuickstepLauncher}\n",
+                                      homeLayers, "mActiveRenderFrameRate=120\n"), "activity-only evidence is not WindowManager focus");
+        check(!launcher_display_ready("mCurrentFocus=null\n", homeLayers, "mActiveRenderFrameRate=120\n"), "null focus cannot expose desktop");
+        check(!launcher_display_ready("mCurrentFocus=Window{abc u0 com.android.settings/.Settings}\n", homeLayers,
+                                      "mActiveRenderFrameRate=120\n"), "stale Home layer cannot override a different focused application");
+        check(!launcher_display_ready(homeWindow, "SurfaceFlinger layer list unavailable", "mActiveRenderFrameRate=120\n"),
+              "focused Home without actual compositor layer is not ready");
+        for (const auto& rate : {"60", "1200", "120.01", "120.0Hz"})
+            check(!launcher_display_ready(homeWindow, homeLayers, "mActiveRenderFrameRate=" + std::string(rate) + "\n"),
+                  "ready gate refuses non-120 or malformed active render rates");
         check(plan.serial == "kiki-release-" + createdOwner.instanceUuid && plan.environment.at(L"KIKI_SDL_WINDOW_TITLE") == L"KikiEmu",
               "release runtime serial and title are isolated from development");
         check(plan.arguments.at(7) == L"host" && plan.environment.at(L"KIKI_SDL_DISABLE_GRAB") == L"1" &&

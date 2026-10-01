@@ -104,6 +104,15 @@ BOOL CALLBACK activate(HWND window, LPARAM parameter) {
     SetForegroundWindow(window); return FALSE;
 }
 } // namespace
+bool launcher_display_ready(const std::string& windows, const std::string& layers, const std::string& display) {
+    static const std::regex focusedHome(
+        R"((?:^|\n)[ \t]*mCurrentFocus=Window\{[^\r\n]*[ \t]com\.android\.launcher3/(?:com\.android\.launcher3\.uioverrides\.QuickstepLauncher|\.uioverrides\.QuickstepLauncher)(?:[ \t}]|$))");
+    static const std::regex active120(
+        R"((?:^|\n)[ \t]*mActiveRenderFrameRate=120(?:\.0+)?[ \t\r]*(?:\n|$))");
+    return std::regex_search(windows, focusedHome) &&
+        layers.find("com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher") != std::string::npos &&
+        std::regex_search(display, active120);
+}
 RuntimePlan runtime_plan(const json& record, const ManagerPaths& paths, const std::string& session,
                          uint16_t adb, uint16_t qmp, uint16_t camera) {
     auto owner = parse_storage_identity(record.at("owner"));
@@ -285,10 +294,8 @@ void supervise_instance(const ManagerPaths& paths, const std::string& id, const 
         shell("wm dismiss-keyguard && input keyevent 3");
         ready = false; deadline = GetTickCount64() + 30000;
         while (qemu.running() && GetTickCount64() < deadline) {
-            auto activity = shell("dumpsys activity activities"), layers = shell("dumpsys SurfaceFlinger --list"), display = shell("dumpsys display");
-            if (std::regex_search(activity, std::regex("mCurrentFocus=Window\\{[^\\r\\n]*com\\.android\\.launcher3/")) &&
-                layers.find("com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher") != std::string::npos &&
-                std::regex_search(display, std::regex("mActiveRenderFrameRate=120(?:\\.0*)?(?:[^0-9.]|$)"))) { ready = true; break; }
+            auto windows = shell("dumpsys window displays"), layers = shell("dumpsys SurfaceFlinger --list"), display = shell("dumpsys display");
+            if (launcher_display_ready(windows, layers, display)) { ready = true; break; }
             Sleep(500);
         }
         if (!ready || shell("dumpsys power").find("mStayOn=true") == std::string::npos || shell("locksettings get-disabled") != "true")
