@@ -61,6 +61,8 @@ $supervisor = Start-Process -FilePath $runner -WindowStyle Hidden -PassThru `
 # Only after log evidence proves boot/configuration/HOME readiness, collect
 # physical full-desktop Windows screenshots and verify complete visible UI.
 # Never treat a just-opened black/inactive window as the final boot state.
+./tools/capture_system_regression.ps1 -Runner $runner -FixtureRoot $fixture -Tag clean32 -Activate
+# For the separate stable resize/maximized comparison, explicitly add -Maximize.
 
 & $runner --shell $fixture 'printf "%s\n" clean-package-persistence-proof > /data/local/tmp/kiki-system-proof; sync'
 & $runner --shutdown $fixture
@@ -81,6 +83,16 @@ SurfaceFlinger HOME layer, 120-Hz rendering, stay-awake and unlocked state pass.
 It writes ERROR and keeps diagnostics on failure; do not restart merely
 because an observation timed out. `--shell` and `--shutdown` recheck exact
 release guest identity before issuing the requested operation.
+
+The dedicated screenshot tool resolves ONLY the runner's verified test
+fixture, requires its running/readiness state and pins the exact recorded
+QEMU creation/path/hash identity. It selects that PID's visible SDL window,
+never a console, title-only/default/newest QEMU or a public user's instance.
+It captures the entire physical Windows virtual desktop using a temporary
+per-monitor-v2 thread DPI context (including the Surface's actual2880x1920),
+not a scaled corner or QEMU framebuffer. Images stay in Downloads/temp and
+are never release inputs. Foreground/maximize changes are explicit switches;
+no AttachThreadInput, host display mode, keyboard or audio changes are used.
 
 Shutdown is graceful and target-scoped, with no kill-all or global ADB command.
 If QEMU does not exit, the runner reports failure and retains the fixture; it

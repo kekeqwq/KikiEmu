@@ -71,6 +71,7 @@
 !/tools/run_kikiaosp_touch_local.ps1
 !/tools/qemu-virgl-fence-events.txt
 !/tools/capture_qemu_window.ps1
+!/tools/capture_system_regression.ps1
 !/tools/measure_kikiaosp_global_fps.ps1
 !/tools/measure_gpu_bench_present.ps1
 !/tools/measure_kikiaosp_gpu_bench.ps1
