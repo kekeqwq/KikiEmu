@@ -18,7 +18,7 @@ this runner is **not** evidence that a real system boots.
   Never substitute a NONBOOTABLE fixture, old developer bundle, initialized
   QCOW2/userdata, or independently guessed boot/system/vendor files.
 - Use the freshly exported, matching native ARM64 QEMU directory with all
-  four tracked patches. Static validation does not certify WHPX/host GPU.
+  five tracked patches (including managed-close and overlay cleanup). Static validation does not certify WHPX/host GPU.
 - Build native components and the camera bridge into the same private test
   output directory. Keep this directory unchanged during the regression.
 - Every fixture root must be NEW and its parent must exist. The runner creates
@@ -31,6 +31,20 @@ this runner is **not** evidence that a real system boots.
 - Even though the internal registry is separate, this runs the **release**
   guest identity/title/boot contract. It does not pretend that a release ZIP
   is a Dev system, or prove release/Dev concurrency by itself.
+
+## Current clean development workspace
+
+All Windows builds, QEMU checkouts, packages, fixtures and logs must be newly
+created beneath `C:\Users\keke\Repos\kikiemu\build` (ignored by Git).
+Do not reuse deleted historical workspace assets or installed user programs.
+Screenshots remain in `C:\Users\keke\Downloads\temp`.
+For 0.2, first reproduce the reported second-boot black screen using the
+public 0.1 package and freshly rebuilt 0.1 consumer/QEMU. Capture readiness,
+power/display/SurfaceFlinger state and the physical desktop before any touch
+or corrective input. Existing 2026-10-01 evidence below does not prove this
+new regression passes. Then validate the system fix and 7.3-rc5 kernel with
+fresh disks and repeated window-close/reboot cycles. Consumer changes, if
+needed, require their own version and release; system-only changes do not.
 
 ## Run after the real package is complete
 

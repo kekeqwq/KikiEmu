@@ -33,7 +33,17 @@ adb -s $serial shell
 
 开发侧内部回归实例不在公开实例 registry 中，不能用公开 `kikiemu info` 查询；发行用户按上面的命令获取自己的当前端口，不要复用开发日志中的数字。
 
+## 当前开发路线与 0.2 Alpha
+
+唯一 Windows 开发目录为 `C:\Users\keke\Repos\kikiemu`；源码与脚本追踪，QEMU checkout、独立原生组件、镜像、测试磁盘和日志全部放在被忽略的 `build/`。截图放在 `C:\Users\keke\Downloads\temp`。不依赖旧工作目录、用户安装或正式实例。
+
+Android 与内核在 `192.168.2.185` 的干净版本分支上开发。Windows 使用 [五补丁构建配方](QEMU_BUILD.md) 和 [独立系统回归入口](tests/SYSTEM_REGRESSION.md)，不使用下方历史 bundle、固定端口或旧 `.sh` 配方重建当前版本。
+
+0.2 Alpha 目标仅为二次启动黑屏修复及 Linux 7.3-rc5 升级；目前尚未完成复现、修复或实机验证。系统变更只推进 KikiAOSP Release；仅当启动器确需修改时才同步推进 KikiEmu/setup.exe。已发布 0.1 标签及附件不覆盖，不开展性能优化。
+
 ## 历史开发回溯主线：2026-09-30
+
+以下为历史实现与证据，包含已过时的候选状态、目录和构建命令，不作为当前开发或发版入口。
 
 唯一默认清单是 [surface-main-20260930.json](profiles/surface-main-20260930.json)，启动入口是 [run_kikiaosp_local.ps1](tools/run_kikiaosp_local.ps1)。具体验收、哈希和限制见 [基线记录](BASELINE_20260930.md)。旧 profile 保留用于显式回溯，不再作为默认值。
 
@@ -111,7 +121,7 @@ Invoke-WebRequest 'https://raw.githubusercontent.com/kekeqwq/KikiEmu/main/build.
 ./build.ps1 --msys2 'C:\msys64'
 ```
 
-已经克隆 QEMU 则从 `cd` 开始；把 MSYS2 路径改成自己的安装路径，例如 `C:\msys2`。脚本检查已安装包，只安装缺失依赖，校验并应用固定四份补丁，再开始构建。默认并行度8，支持 `-Jobs 4`；也接受 PowerShell 风格的 `-Msys2`。
+已经克隆 QEMU 则从 `cd` 开始；把 MSYS2 路径改成自己的安装路径，例如 `C:\msys2`。脚本检查已安装包，只安装缺失依赖，校验并应用固定五份补丁，再开始构建。默认并行度8，支持 `-Jobs 4`；也接受 PowerShell 风格的 `-Msys2`。
 
 建议但不强制使用已验证的 QEMU 提交 `bde658eef6b38c45794bfd7ad4d2dd1b574e4694`，需要时在构建前自行执行 `git checkout --detach bde658eef6b38c45794bfd7ad4d2dd1b574e4694`。其他提交只输出兼容性警告，仍会继续尝试补丁和构建，可能失败；脚本不会替用户切换或锁定提交。增量记录保存实际 HEAD，打过补丁后若换版本则使用新 checkout，不复用旧补丁／构建状态。
 
@@ -135,9 +145,9 @@ kikiemu --delete --force --id 01
 
 `~/xxx` 和 `~\xxx` 由 KikiEmu 展开为当前用户主目录，尾随分隔符可正常使用；空格路径请加引号。系统包不存在、目录已有数据、运行依赖不完整、路径歧义等报错给出实际目标，不把不存在的文件误报成路径重定向。create 实时输出检查、解包、导入进度、磁盘回读和注册日志；失败不静默覆盖用户已有目录。不要只复制一个 DLL 或用旧 EXE 冒充新构建。
 
-发行配方包含 [通道标题补丁](patches/qemu-sdl-channel-title.patch)：正式版设置 `KIKI_SDL_WINDOW_TITLE=KikiEmu`，无该环境变量时保留开发标题行为。配置管理器要求这个编译能力标记，所以新入口固定应用全部四份补丁，不能用旧开发 EXE 代替。静态检查不能代替完整系统启动或宿主 GPU 兼容性实测。
+发行配方包含 [通道标题补丁](patches/qemu-sdl-channel-title.patch)：正式版设置 `KIKI_SDL_WINDOW_TITLE=KikiEmu`，无该环境变量时保留开发标题行为。配置管理器要求这个编译能力标记，所以新入口固定应用全部五份补丁，不能用旧开发 EXE 代替。静态检查不能代替完整系统启动或宿主 GPU 兼容性实测。
 
-发行启动将只使用实例保存的规范化 QEMU 路径及已验证文件身份；缺失、不兼容或文件变化时给出英文错误，不搜索 PATH、不回退到旧开发 EXE、不自动换成软件渲染。正式和 Dev 使用独立 bin/output 目录。KikiEmu 卸载不删除用户提供的 QEMU 或用户磁盘。
+发行启动将只使用实例保存的规范化 QEMU 路径及已验证文件身份；缺失、不兼容或文件变化时给出英文错误，不搜索 PATH、不回退到旧开发 EXE、不自动换成软件渲染。开发测试使用新建私有 bin/output 与 storage，不操作正式用户实例。KikiEmu 卸载不删除用户提供的 QEMU 或用户磁盘。
 
 安装器、CLI 初始化、PATH/快捷方式和卸载的用户视角验收由用户执行；本轮开发不运行 setup.exe 或修改用户 PATH。构建检查与系统本身的启动/图形/持久化回归由开发侧负责，待候选准备好后交付用户。
 
