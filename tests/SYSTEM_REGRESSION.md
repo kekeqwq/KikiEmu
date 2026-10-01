@@ -62,6 +62,10 @@ $supervisor = Start-Process -FilePath $runner -WindowStyle Hidden -PassThru `
 # physical full-desktop Windows screenshots and verify complete visible UI.
 # Never treat a just-opened black/inactive window as the final boot state.
 ./tools/capture_system_regression.ps1 -Runner $runner -FixtureRoot $fixture -Tag clean32 -Activate
+# If Windows denies activation while the user is working, -Unobscured can
+# briefly raise only the exact owned window without activation/input hooks;
+# its previous non-topmost state is restored after the full-desktop capture.
+./tools/capture_system_regression.ps1 -Runner $runner -FixtureRoot $fixture -Tag clean32 -Unobscured
 # For the separate stable resize/maximized comparison, explicitly add -Maximize.
 
 & $runner --shell $fixture 'printf "%s\n" clean-package-persistence-proof > /data/local/tmp/kiki-system-proof; sync'
@@ -93,6 +97,11 @@ per-monitor-v2 thread DPI context (including the Surface's actual2880x1920),
 not a scaled corner or QEMU framebuffer. Images stay in Downloads/temp and
 are never release inputs. Foreground/maximize changes are explicit switches;
 no AttachThreadInput, host display mode, keyboard or audio changes are used.
+The optional `-Unobscured` switch temporarily changes only this pinned test
+window's Z-order, never another app's focus/input. It retains an originally
+topmost window's state and restores an originally non-topmost window in
+`finally`, including failure paths. Do not call this foreground acceptance;
+it is an unobscured physical-desktop observation.
 
 Shutdown is graceful and target-scoped, with no kill-all or global ADB command.
 If QEMU does not exit, the runner reports failure and retains the fixture; it
@@ -116,10 +125,17 @@ producer/source-lock/kernel/consumer/QEMU identities and:
    wallpaper, Launcher/SystemUI and resizing regressions as applicable.
 5. Hardware acceleration/high-refresh identity plus actual rendered Windows
    evidence and a runtime stability interval, not only PE/compiler markers.
-6. Separate release A/Dev B coexistence and wrong-target rejection using the
-   guarded Dev tools. This single-instance runner does not cover that gate.
+6. Retain target-owned process/endpoint/storage negative checks and identify
+   any user-dependent or unperformed observations explicitly. On2026-10-01
+   the user withdrew the independent Dev-tool/concurrency gate and chose
+   ordinary same-format versioned packages as the future development route.
+   This runner does not claim that the former concurrency matrix passed.
 
-Only after these system results are recorded can the matching **test** ZIP be
-handed off with setup.exe and published candidate instructions. Installation,
-PATH, shortcuts, public create/set/delete/default and uninstallation remain
-the user's own acceptance work; do not relabel this internal run as their test.
+Record the matching clean-package fresh boots, actual capacities, persistent
+reboots, UI/GPU and applicable functional results before handing off a **test**
+ZIP with setup.exe and candidate instructions. Distinguish guest-injected
+actions from real host touch/physical-keyboard acceptance; the latter may be
+completed by the user alongside installer testing. Installation, PATH,
+shortcuts, public create/set/delete/default and uninstallation remain the
+user's own acceptance work. Outstanding public-release gates stay explicit;
+neither this internal run nor a test handoff is public-release acceptance.

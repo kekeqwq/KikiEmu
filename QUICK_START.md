@@ -15,7 +15,9 @@ OpenGL/VirGL path, and adequate free storage and host memory. The accepted test
 hardware is the Snapdragon Surface. Other hardware has not been certified.
 WHPX and a real system boot are required; byte/architecture checks alone cannot
 prove GPU or driver compatibility. See the repository README for the exact
-native MSYS2 CLANGARM64 QEMU build/export recipe and prerequisites.
+native MSYS2 CLANGARM64 QEMU build/export recipe and prerequisites. The
+self-contained [QEMU build guide](QEMU_BUILD.md) includes the exact frozen
+candidate checkout, dependency packages and all four required patches.
 
 ## Install and initialize
 
@@ -37,11 +39,21 @@ and is immutable after creation. The standalone QCOW2 grows physically as data
 is written; it is not preallocated. Host use, decimal GB displayed by Android,
 filesystem overhead and free data space are not the same quantity.
 
+Examples assume the new instance printed `Created id 01`. If retained instances
+already exist, use the actual new ID printed by creation for default/set/start
+and ADB; do not accidentally select an older instance.
+
 After successful creation, the downloaded ZIP is no longer needed. APKs,
 photos and settings persist in the chosen storage. Double-click KikiEmu to
 start the configured default with the native boot logo/logs, then Android.
 No initialization/default or an incompatible runtime produces an English
 error dialog; the launcher never silently selects another system or QEMU.
+
+Creation can take several minutes while validating and reading back the disk.
+Wait for `Created id NN`; do not start a second creation into the same folder.
+If creation is interrupted before registration, keep that folder for diagnosis
+and choose another NEW folder for a retry. Full crash/interruption recovery is
+not certified in this candidate; never reformat established data to recover it.
 
 ## Manage an instance
 
@@ -61,10 +73,59 @@ The default preset keeps the tested 8 vCPU/4 GiB, SDL/VirGL/120 Hz and
 1003×1556 native-pixel window. Guest 120 Hz support is not a guarantee of
 120 FPS; remaining input/render latency is a known Alpha limitation.
 
-`adb --shell` is a bounded, one-shot command against this instance's private
-transport, not a global ADB server or an interactive shell. Release and Dev
-instances have distinct identities/endpoints. Never use generic QEMU-name
-kills or global ADB commands to manage installed instances.
+`kikiemu adb --shell` is a bounded, one-shot command against this instance's
+transport, not an interactive shell. It does not register a connection in the
+Platform Tools ADB server, so an empty `adb devices` list does not mean that
+Android or adbd failed to start.
+
+## Connect ordinary Android Platform Tools ADB
+
+Install Android Platform Tools separately if you need `adb shell`, APK
+installation, or file transfer. With instance 01 **running**, open PowerShell:
+
+```powershell
+$instance = kikiemu info --id 01 | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'Could not read instance 01.' }
+$endpoint = @($instance.runtime.endpoints | Where-Object role -eq 'adb')
+if ($endpoint.Count -ne 1) { throw 'Start instance 01 and wait for Android first.' }
+$serial = '127.0.0.1:' + $endpoint[0].port
+adb connect $serial
+adb devices -l
+adb -s $serial shell
+```
+
+The port is allocated on **each start**. Do not assume port 5555 or reuse a
+port from a previous boot. Run the commands above again after restarting the
+instance. Always use `-s $serial` if more than one device is listed.
+
+Examples after connecting (run these in the host PowerShell, not inside the
+Android shell):
+
+```powershell
+adb -s $serial install "$HOME/Downloads/example.apk"
+adb -s $serial pull /sdcard/Pictures "$HOME/Pictures/Android"
+adb -s $serial shell getprop ro.serialno
+adb disconnect $serial
+```
+
+Connecting does not require a new image, reinstallation or an ADB-server
+restart. Do not use `adb kill-server` or process-name kills to manage a VM.
+The built-in `kikiemu adb --id 01 --shell "COMMAND"` remains available without
+Platform Tools and selects the recorded instance directly.
+
+## Future development and system versions
+
+As agreed on 2026-10-01, subsequent fixes are built and tested as ordinary
+versioned packages in the **same format**, then advance to 0.2, 0.3 and so on.
+A separate Dev channel/registry/launcher and mandatory release/Dev concurrency
+test are no longer required. The existing per-instance UUID, process and
+endpoint checks remain: this is simpler development, not permission to stop
+unrelated processes or overwrite established storage.
+
+Test a new system ZIP in a NEW storage folder with `create`, and select its
+explicit instance ID. In 0.1, `set` changes resources/QEMU only; it does not
+replace an installed OS or resize a disk. Published assets remain immutable;
+a repair is a new version, not new bytes under an old version's filename.
 
 ## Delete versus uninstall
 

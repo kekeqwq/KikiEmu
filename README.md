@@ -8,7 +8,32 @@
 | [kikiaosp_kernel](https://github.com/kekeqwq/kikiaosp_kernel) | Linux 7.3-rc4 4 KiB 内核与 Nix 构建 |
 | 本仓库 | Windows ARM64 QEMU 补丁及构建、摄像头桥接、开发镜像收集/启动/测试；终端用户配置管理器、系统安装器与桌面启动入口 |
 
-## 当前主线：2026-09-30
+## 0.1 Alpha 候选与后续开发
+
+终端用户先看 [英文使用说明](QUICK_START.md)，QEMU 单独按 [QEMU 构建说明](QEMU_BUILD.md) 准备。当前 R8 的 `setup.exe` 与干净系统 ZIP 已生成；实际源提交、校验值和系统测试边界见 [候选记录](CANDIDATE_TEST_20261001.md)。安装器、PATH、快捷方式与公开 CLI 的验收由用户执行，尚未发布 GitHub Release。不要使用下面历史 bundle 的启动命令初始化发行实例。
+
+按2026-10-01更新的约定，后续修补从本次干净包基线推进：设备／内核仓库构建 → 保持 format-1 的新版本 ZIP → KikiEmu 在新 storage 中初始化并实测 → 推进0.2、0.3。取消独立 Dev 通道与严格开发／发行并行隔离门槛；保留单实例 UUID、进程／端点身份和磁盘所有权核验。已有实例不自动换系统，已发布资产不覆盖；0.1不支持就地升级系统或调整磁盘总容量。
+
+### 普通 adb 没有设备时怎么连接
+
+KikiEmu 内置的 ADB 直接访问实例，不自动登记到普通 `adb devices`。Android 已启动但列表为空时，先取得**这次启动**的端口，再连接：
+
+```powershell
+$instance = kikiemu info --id 01 | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'Could not read instance 01.' }
+$endpoint = @($instance.runtime.endpoints | Where-Object role -eq 'adb')
+if ($endpoint.Count -ne 1) { throw 'Start instance 01 and wait for Android first.' }
+$serial = '127.0.0.1:' + $endpoint[0].port
+adb connect $serial
+adb devices -l
+adb -s $serial shell
+```
+
+普通 adb 需要另装 Android Platform Tools；端口每次启动重新分配，**不要固定使用5555**。重启后重新运行上面的命令；多设备时始终指定 `-s $serial`。安装 APK、传照片与断开连接的完整示例见 [QUICK_START.md](QUICK_START.md#connect-ordinary-android-platform-tools-adb)。不使用外部 adb 时可以直接 `kikiemu adb --id 01 --shell "uname -r"`。
+
+本轮内部系统测试还没有安装到公开实例 registry，不能用公开 `kikiemu info` 查询它。它在2026-10-01当前会话的端口为51590，已实际连接验证：`adb connect 127.0.0.1:51590`、`adb -s 127.0.0.1:51590 shell`。这个数字仅用于本次现有窗口，不是发行默认值，也不承诺下次启动相同。
+
+## 历史开发回溯主线：2026-09-30
 
 唯一默认清单是 [surface-main-20260930.json](profiles/surface-main-20260930.json)，启动入口是 [run_kikiaosp_local.ps1](tools/run_kikiaosp_local.ps1)。具体验收、哈希和限制见 [基线记录](BASELINE_20260930.md)。旧 profile 保留用于显式回溯，不再作为默认值。
 
@@ -74,7 +99,9 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH
 
 ### 发行版使用用户指定的 QEMU
 
-0.1 的模块边界：KikiEmu 只做配置管理、系统安装和按配置启动；KikiAOSP ZIP 只包含系统必需文件及配套内核；QEMU 由用户独立构建/提供。以下是**正在实现的发行接口**，不是已经交付的安装包：
+独立英文逐步说明见 [QEMU_BUILD.md](QEMU_BUILD.md)：从指定候选提交、新装MSYS2依赖到四份补丁构建、私有bin导出及用户 `--qemu` 配置。不要从旧开发main/旧EXE猜测发行运行库。
+
+0.1 的模块边界：KikiEmu 只做配置管理、系统安装和按配置启动；KikiAOSP ZIP 只包含系统必需文件及配套内核；QEMU 由用户独立构建/提供。以下接口已包含在R8候选安装器中，等待用户安装／公开CLI验收：
 
 ```powershell
 kikiemu create --system ~/Downloads/KikiAOSP-0.1.0-alpha-arm64.zip --storage ~/MyAndroid --size 200g --qemu ~/Tools/KikiQemu/bin
@@ -105,7 +132,7 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH  # 仅当前开发终端，�
 
 导出器只接受新目录，收集本次构建的 ARM64 EXE、静态导入的 DLL 依赖链和 ROM，记录哈希，并检查导出结果不再依赖 MSYS2 DLL 目录。`DependencyBin` 只是**构建导出输入**，不是用户启动时的 fallback。目录检查不启动虚拟机，也不安装程序、改注册表或修改用户实例。
 
-当前检查工具是内部开发工具，不是用户验收入口；静态补丁标记/PE/DLL 检查不能代替 GPT 启动 ABI、动态加载模块、宿主 OpenGL/Mesa D3D12 → Adreno 和完整系统实测。发行配方现已额外应用 [通道标题补丁](patches/qemu-sdl-channel-title.patch)：正式版设置 `KIKI_SDL_WINDOW_TITLE=KikiEmu`，无该环境变量时保留开发标题行为。配置管理器要求这个编译能力标记，所以必须在**新目录**按当前四份补丁完整构建、导出，不要把旧开发 EXE 直接绑定为发行运行库。最新原生重建已通过目录/离线磁盘检查，真实发行系统及并行隔离验收仍未完成。
+当前检查工具是内部开发工具，不是用户验收入口；静态补丁标记/PE/DLL 检查不能代替 GPT 启动 ABI、动态加载模块、宿主 OpenGL/Mesa D3D12 → Adreno 和完整系统实测。发行配方现已额外应用 [通道标题补丁](patches/qemu-sdl-channel-title.patch)：正式版设置 `KIKI_SDL_WINDOW_TITLE=KikiEmu`，无该环境变量时保留开发标题行为。配置管理器要求这个编译能力标记，所以必须在**新目录**按当前四份补丁完整构建、导出，不要把旧开发 EXE 直接绑定为发行运行库。最新目录检查和实际干净系统启动已通过，测试字节与范围见候选记录；不代表其他设备／驱动已经认证。
 
 发行启动将只使用实例保存的规范化 QEMU 路径及已验证文件身份；缺失、不兼容或文件变化时给出英文错误，不搜索 PATH、不回退到旧开发 EXE、不自动换成软件渲染。正式和 Dev 使用独立 bin/output 目录。KikiEmu 卸载不删除用户提供的 QEMU 或用户磁盘。
 
@@ -119,11 +146,11 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH  # 仅当前开发终端，�
 
 运行管理源码为每次启动建立独立会话 UUID、ADB/QMP/相机回环端口和日志目录；进程先暂停创建、登记精确身份后才执行。正式窗口标题为 `KikiEmu`，开发计划为 `QEMU/Dev`，控制和删除不依赖标题。私有 ADB wire 直接连登记的客机，不使用全局 5037 服务、默认设备或宿主 ADB key；单次命令接口为 `kikiemu adb --id 01 --shell "getprop ro.serialno"`，暂不提供交互式 shell。原生启动配方沿用 SDL/VirGL/120 Hz、8 CPU/4 GiB、1003×1556、不 Grab 的基线，不对宿主显示/键盘/音频设定作修改。
 
-强制删除已额外验证运行中的 supervisor 持有真实 storage lease 的情况：只读核验和锁定原目录身份，停止该实例后才升级删除权限；替换路径或未释放锁仍拒绝。当前 304 项隔离内部检查包括进程/端口隔离、私有 shell-v2 的分段数据/校验/超时/错误身份和持锁实例删除，以及安装运行期互斥、完整 PATH 精确分段/去重/长度检查、真实 HOME 就绪解析和专用系统测试目录隔离；额外传入 producer 非可启动 ZIP fixture 时另有一项交叉读取检查。真实 Android 的 adbd 报告最高支持版本；客户端按 [AOSP 协商逻辑](https://android.googlesource.com/platform/packages/modules/adb/+/HEAD/adb.cpp) 接受已知版本，但仍广告旧版并严格核验所有包的校验和，拒绝 AUTH/TLS/未知协议和错误实例，不使用全局 ADB 服务。所有安装入口持有 `install.lock` 共享 lease，setup/卸载必须先取得独占 lease，不能覆盖运行中的启动器，也不自动杀实例；卸载保留实例记录与磁盘。公开安装器/CLI 的最终用户验收仍由用户执行。
+强制删除已额外验证运行中的 supervisor 持有真实 storage lease 的情况：只读核验和锁定原目录身份，停止该实例后才升级删除权限；替换路径或未释放锁仍拒绝。当前 306 项隔离内部检查包括进程/端口隔离、私有 shell-v2 的分段数据/校验/超时/错误身份和持锁实例删除，以及安装运行期互斥、完整 PATH 精确分段/去重/长度检查、真实 HOME 就绪解析和专用系统测试目录隔离；额外传入 producer 非可启动 ZIP fixture 时另有一项交叉读取检查。真实 Android 的 adbd 报告最高支持版本；客户端按 [AOSP 协商逻辑](https://android.googlesource.com/platform/packages/modules/adb/+/HEAD/adb.cpp) 接受已知版本，但仍广告旧版并严格核验所有包的校验和，拒绝 AUTH/TLS/未知协议和错误实例，不使用全局 ADB 服务。所有安装入口持有 `install.lock` 共享 lease，setup/卸载必须先取得独占 lease，不能覆盖运行中的启动器，也不自动杀实例；卸载保留实例记录与磁盘。公开安装器/CLI 的最终用户验收仍由用户执行。
 
 本轮独立干净产物的身份、校验值与已取得的真实系统证据见 [候选测试记录](CANDIDATE_TEST_20261001.md)。该记录区分候选包、实际系统验证和仍未完成的发版门槛，不用旧开发磁盘替代干净系统包。
 
-正常关机的进程存活检查使用同一个持有的Windows进程句柄，避免进程恰好退出时映像查询失败被误报。仅在该句柄真正变为已退出时才返回“已退出”；仍活着的创建时间/路径/哈希错误及查询权限失败继续拒绝，不能按名字或复用PID绕过检查。行为依据 [Windows进程对象与退出信号](https://learn.microsoft.com/en-us/windows/win32/procthread/terminating-a-process)；八个确定性状态转换检查和已有真实受控子进程检查覆盖此逻辑。
+正常关机的进程存活检查使用同一个持有的Windows进程句柄，避免进程恰好退出时映像查询失败被误报。仅映像查询异常时对同一个句柄有界等待最多1000ms，并且只有该对象实际发出退出信号才视作退出；等待超时、仍活着的创建时间/路径/哈希错误及查询权限失败继续拒绝，不能按名字或复用PID绕过检查。行为依据 [Windows进程对象与退出信号](https://learn.microsoft.com/en-us/windows/win32/procthread/terminating-a-process)；十个确定性状态转换检查和已有真实受控子进程检查覆盖此逻辑。R8的32GiB新系统启动及持久化重启均正常关机成功，200GiB新系统正常关机后也已在原始ZIP路径不可用时持久化重启，具体证据以候选记录为准。
 
 共用合同从设备仓库 commit `5cfd0a94c1b267661d2ae96bdc3875365ad686cf` 固定引入，见 [PIN.json](src/kikiemu/contracts/PIN.json)；构建时核对三个 JSON 文件的 SHA-256，再嵌入本机程序。ZIP/ZIP64 只允许规定文件、store/deflate、普通文件及一致的 local/central 名称；拒绝 SFX、重复/截断/NUL/路径跳转、隐藏附加文件、未知角色、开发身份或错误 ABI。长度、哈希、AOSP XML 精确项目提交、4K ARM64 boot/gzip 和 raw EROFS 再作语义核验，禁止执行包内代码。这里的测试 ZIP 是明确标记的非可启动假数据，绝不是用户需要的系统包。
 
@@ -139,9 +166,9 @@ $env:PATH = 'C:\msys64\clangarm64\bin;' + $env:PATH  # 仅当前开发终端，�
 
 `tools/check_gpt_guest_storage.ps1` 是只读系统检查工具：必须显式指定 QEMU PID/EXE/实例路径，核对进程创建身份与 ADB端点所有权后，比较GPT记录、内核完整盘容量、vold及StorageStats两个接口、F2FS容量；不修改用户数据，不调用用户CLI初始化。真实Settings页面与持久化仍需分别观察。
 
-低层开发入口新增 `PhoneDisk` / `BootPartitionUuid` / `RamdiskImage`，显式 GPT 模式只接入该独立磁盘、禁止 legacy overlay 混用且不加 `-snapshot`；不传这些参数时原多盘回溯基线不变。该入口仍使用开发测试端点，不是尚待实现的正式/Dev 隔离管理器。
+历史低层入口提供 `PhoneDisk` / `BootPartitionUuid` / `RamdiskImage`，显式 GPT 模式只接入该独立磁盘、禁止 legacy overlay 混用且不加 `-snapshot`；不传这些参数时原多盘回溯基线不变。该入口仍使用旧开发端点，只用于显式回溯；未来修补按上面的同格式包／KikiEmu实例路线推进。
 
-启动器图标主图及七尺寸 Windows ICO 已保存到 [assets](assets/README.md)，由内置 image_gen 按原创女孩抱机器人 brief 生成，完整 prompt 与转换步骤一并存档；安装器资源接入尚未完成。
+启动器图标主图及七尺寸 Windows ICO 已保存到 [assets](assets/README.md)，由内置 image_gen 按原创女孩抱机器人 brief 生成，完整 prompt 与转换步骤一并存档，已接入R8程序和安装器资源。
 
 ## 3. 收集、校验并打包（现有开发基线）
 
@@ -158,7 +185,7 @@ ssh keke@192.168.2.185 'git -C ~/projects/kikiaosp_test status --short'
 
 镜像、QEMU 源码/二进制、运行依赖和辅助压缩包均不纳入 Git。辅助包 `kikiaosp-runtime-support-20260926.tar.zst` 只有约 21 MiB，但包含 8 GiB 基础 userdata、冻结 ramdisk、misc 与空辅助盘；它不是本次 `m systemimage vendorimage` 自动产物。复现上述冻结基线仍须迁移这些旧资产。发行分支另有设备侧 [源码生成 boot/initramfs 的原型](https://github.com/kekeqwq/kikiaosp_test/blob/feat/release-0_1-alpha/docs/BOOT_PAYLOAD.md)，已在同组开发系统镜像下实测启动；它不重建旧 ramdisk 的同一哈希，不证明新 GPT/新 userdata 或干净发行镜像已完成。
 
-## 4. 启动、检查和退出
+## 4. 历史 bundle 的启动、检查和退出
 
 ```powershell
 .\tools\run_kikiaosp_local.ps1 -ValidateAllAssets
@@ -185,7 +212,7 @@ QEMU 在后台无控制台运行。监控仅监听 `127.0.0.1:4447`，ADB `127.0
 
 终端用户英文初始化/管理/删除/卸载说明见 [QUICK_START.md](QUICK_START.md)。发行安装器的构建、原生 ARM64 程序边界、运行中拒绝覆盖和保留用户数据的卸载约束见 [INSTALLER.md](INSTALLER.md)。只编译安装包、不执行它；setup.exe 与公开 CLI 的用户视角验收由用户进行。系统源码的独立发行构建同时在设备仓库推进，不能用开发资产代替干净系统 ZIP。
 
-0.1 Alpha 已进入独立发布分支实现，尚未产出已验收的 setup.exe/系统 ZIP，见 [RELEASE_PLAN.md](RELEASE_PLAN.md)。正式系统包仅交付干净构建的安装材料，不包含用户磁盘；客户端新建固定总容量、动态占用的持久化磁盘。现有冻结 bundle/collector 是开发回溯格式，不是公开发版格式。系统包合同由 kikiaosp_test 维护，格式/schema/语义校验及双方兼容性测试在首个原型通过后冻结。QEMU 通过 create/set --qemu 指定并校验，不强制内置。正式与开发版本的身份、独立运行库、数据、ADB/控制/相机端点隔离必须在0.1发布前完成；用户正式实例运行时推进开发的误操作防护是永久发布门槛。
+0.1 Alpha 的 R8 setup.exe 和真正独立干净构建的系统 ZIP 已生成，系统已在32／200 GiB新盘启动并持久化重启；它们仍是待用户安装器验收的候选，不是已公开发版。见 [RELEASE_PLAN.md](RELEASE_PLAN.md) 和 [候选记录](CANDIDATE_TEST_20261001.md)。系统包仅交付干净安装材料，不包含用户磁盘；客户端新建固定总容量、动态占用的持久化磁盘。现有冻结 bundle/collector 只用于历史回溯，不能作为新版本发版输入。包合同由 kikiaosp_test 维护；后续版本继续使用相同格式及双方校验，不因0.2／0.3改文件形式。QEMU 通过 create/set --qemu 显式指定并校验，不强制内置。独立 Dev 通道与严格并行隔离门槛已按用户2026-10-01的新要求取消，不删除已实现的基本实例控制安全校验。
 
 原生 SDL 启动控制台已通过实际启动和用户验收，纳入默认主线；Android/内核资产不变。遮罩前的冻结基线见 [surface-main-pre-boot-console-20260930.json](profiles/surface-main-pre-boot-console-20260930.json)，仅用于显式回溯。构建、状态判断和证据边界见 [BOOT_CONSOLE.md](BOOT_CONSOLE.md)。
 

@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory)][string]$FixtureRoot,
     [ValidatePattern('^[A-Za-z0-9_-]{1,48}$')][string]$Tag = 'clean-system',
     [switch]$Activate,
-    [switch]$Maximize
+    [switch]$Maximize,
+    [switch]$Unobscured
 )
 $ErrorActionPreference = 'Stop'
 $runnerPath = (Resolve-Path -LiteralPath $Runner).Path
@@ -23,6 +24,8 @@ if ($owned.Count -ne 1 -or $owned[0].instanceUuid -cne $record.uuid -or $owned[0
 }
 $identity = $owned[0]
 $process = Get-Process -Id ([int]$identity.pid) -ErrorAction Stop
+$temporarilyTopmost = $false
+$capturedWindow = [IntPtr]::Zero
 try {
     # Holding its process handle prevents selecting a reused PID. Never choose
     # the newest QEMU, a title-only window or an installed public default.
@@ -47,6 +50,8 @@ public static class KikiOwnedSystemCapture {
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
   [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
 }
@@ -66,10 +71,21 @@ public static class KikiOwnedSystemCapture {
     }
     [KikiOwnedSystemCapture]::EnumWindows($callback, [IntPtr]::Zero) | Out-Null
     if ($windows.Count -ne 1 -or $process.HasExited) { throw 'No unique owned native SDL display window; console/Grab/wrong windows refused.' }
+    $capturedWindow = $windows[0]
     if ($Maximize) { [KikiOwnedSystemCapture]::ShowWindow($windows[0], 3) | Out-Null }
     if ($Activate) {
         if (-not $Maximize) { [KikiOwnedSystemCapture]::ShowWindow($windows[0], 9) | Out-Null }
         if (-not [KikiOwnedSystemCapture]::SetForegroundWindow($windows[0])) { throw 'Windows refused foreground activation. No keyboard/thread-input settings were changed.' }
+        Start-Sleep -Milliseconds 500
+    }
+    if ($Unobscured -and (([KikiOwnedSystemCapture]::GetWindowLongPtr($capturedWindow, -20).ToInt64() -band 8) -eq 0)) {
+        # Windows may refuse foreground activation while the user is typing.
+        # Raise ONLY this pinned SDL test window, without activation or input
+        # attachment; restore its original non-topmost state in finally.
+        if (-not [KikiOwnedSystemCapture]::SetWindowPos($capturedWindow, [IntPtr]::new(-1), 0, 0, 0, 0, 0x13)) {
+            throw 'Could not temporarily uncover the exact owned test window.'
+        }
+        $temporarilyTopmost = $true
         Start-Sleep -Milliseconds 500
     }
     $previousDpi = [KikiOwnedSystemCapture]::SetThreadDpiAwarenessContext([IntPtr]::new(-4))
@@ -93,4 +109,15 @@ public static class KikiOwnedSystemCapture {
             "OWNED_QEMU_PID=$($process.Id) SESSION=$($record.runtime.sessionUuid) PIXELS=${width}x${height} PATH=$path"
         } finally { $bitmap.Dispose() }
     } finally { [KikiOwnedSystemCapture]::SetThreadDpiAwarenessContext($previousDpi) | Out-Null }
-} finally { $process.Dispose() }
+} finally {
+    try {
+        if ($temporarilyTopmost -and -not $process.HasExited) {
+            $restorePid = [uint32]0
+            [KikiOwnedSystemCapture]::GetWindowThreadProcessId($capturedWindow, [ref]$restorePid) | Out-Null
+            if ($restorePid -eq $process.Id -and
+                -not [KikiOwnedSystemCapture]::SetWindowPos($capturedWindow, [IntPtr]::new(-2), 0, 0, 0, 0, 0x13)) {
+                Write-Warning 'The owned test window could not be restored to non-topmost; no other window was changed.'
+            }
+        }
+    } finally { $process.Dispose() }
+}

@@ -5,6 +5,61 @@ Do not replace published asset bytes or treat internal system testing as the
 user's installer/CLI acceptance. The binaries below were built from the stated
 frozen commits; later documentation commits do not change that provenance.
 
+## Current R8 compiled candidate
+
+| File | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `setup.exe` (R8) | 2,074,660 | `b1a6b5100838ecbbf0aa27d5a54e70afb3ae268ac68ba0ac6dc1a28548af36fe` |
+| `KikiAOSP-0.1.0-alpha-arm64.zip` | 834,421,223 | `73a184068b2c1b5576add96bcbadf4621bf3c3998c7f01fffeb624ee44aad42a` |
+| `KikiEmu-source-2130e52.zip` | 2,175,472 | `28f76f1a497a6108507ae0af3435b03e68d772472eb4f313181a71649ec284d2` |
+
+R8 native source is `2130e523573d3304a3fa05b3c88e5dca79ff3ff5`, built from a
+clean detached checkout. Both completed native receipts match that commit;
+306 isolated internal checks passed. Static installer extraction verified
+nine key embedded component/license hashes and excluded disks, QEMU and
+internal test tools. **setup.exe has not been executed or installed.**
+
+R8's independently installed 32 GiB clean system reached real HOME, preserved
+its written data marker through normal reboot, retained exact block/vold/
+StorageStats capacity and 120-Hz rendering, and passed **two** graceful
+shutdowns with a successful manager result and complete owned cleanup.
+The independently installed 200 GiB clean system reached HOME, passed the
+same exact capacity checks and its first graceful shutdown. Its normal
+persistent reboot also reached READY with the original ZIP path unavailable;
+the data marker, exact capacity and 120-Hz field survived. The original ZIP
+was then restored and its SHA-256 rechecked. This does not certify the
+remaining system/publication matrix.
+
+R8's 200 GiB reboot additionally passed an actual virtual-Ethernet external
+ping, rear/front preview switching, two saved JPEGs, and camera release on
+returning HOME. Its native camera bridge was rebuilt with R8 and has SHA-256
+`8341ca879424681d3b08adbbe3f2f1bd0097a4cdc262b4c7125bdb662b8f124b`;
+these are new R8 observations, not assumed byte identity with R6. The sampled
+crash buffer was empty. Ringtone selection produced an active 48-kHz speaker
+output with AudioFlinger frames advancing from 925,696 to 1,024,000; this is
+output-pipeline evidence, not a new human audio-quality acceptance.
+
+R8 also changed actual guest rendering to2784×1875 on maximization and restored
+1003×1556 afterward, preserving SystemUI PID775 and the120.00001 active field.
+The full physical Windows captures show complete HOME rather than a scaled
+corner. Ordinary Platform Tools ADB was independently connected to this
+session's51590 port: `adb devices -l` reported the expected KikiAOSP0.1Alpha
+device, and an explicitly targeted shell returned its exact serial,
+`sys.boot_completed=1` and `7.3.0-rc4-4k`. The built-in transport does not
+automatically register a device in the Platform Tools server; see QUICK_START.
+
+The same200-GiB reboot remained running for more than30minutes, including the
+network/camera/audio/resize tests. A later live sample recorded guest uptime
+2,221.96seconds, unchanged system_server/SystemUI/Launcher PIDs528/775/963,
+1003×1556 and120.00001, with no entries in the sampled crash/ANR event buffers.
+This is observed runtime stability, not a continuous FPS/latency guarantee.
+The test window is retained for the user; it has not been closed for handoff.
+
+The companion/remote user guide includes the later ADB instructions and the
+user's revised development policy. R8's embedded guide and archived source
+remain the actual frozen2130e52 inputs; the documentation update does not
+pretend these already compiled bytes came from a later source commit.
+
 ## R6 artifacts (historical, not the final handoff)
 
 Real shutdown exposed an exit/query race in R6: Android and its owned runtime
@@ -46,7 +101,7 @@ disk, userdata, QEMU, developer logs, keys or screenshots. The kernel is inside
 the boot payload. Full EROFS extraction and actual release property checks
 preceded canonical package validation.
 
-## Native build checks
+## Historical R6 native build checks
 
 The five installed native runtime components are ARM64. NSIS 3.13 supplies the
 standard installer stub. Both native build receipts report the same clean
@@ -56,7 +111,7 @@ and license hashes. Neither setup.exe nor public CLI/desktop entry points were
 executed by the agent. User PATH, shortcuts and installed instances were not
 modified by these checks.
 
-## Actual clean-system evidence
+## Historical R6 clean-system evidence
 
 An internal system-only runner used the real ZIP and the complete paired
 WHPX/ARM64/SDL/VirGL recipe, not a metadata fixture or bare QEMU probe.
@@ -99,12 +154,15 @@ Android. Kernel, vold and StorageStats agree on **214,748,364,800 bytes**.
 Settings shows **215 GB total / about 2.6 GB used**, not a fabricated fixed
 system allocation. Initial `/data` use was 1,355,184 KiB, including real F2FS
 overhead for this larger volume. Its data marker was written and synchronized;
-its reboot result is not yet claimed here.
+R6's reboot result is not claimed here. R8's separate successful reboot is
+recorded above; the two fixtures and native candidates are not interchangeable.
 
 ## Instructions and outstanding gates
 
 - [User guide](QUICK_START.md): create/list/default, resource/QEMU settings,
   start, scoped ADB, explicit force-delete and uninstall semantics.
+- [QEMU build guide](QEMU_BUILD.md): the exact frozen candidate checkout,
+  native MSYS2 packages, four patches and independent bin export.
 - [README](README.md): the native MSYS2 CLANGARM64 QEMU build/export recipe,
   exact upstream revision, four release patches and required dependencies.
 - [Installer build](INSTALLER.md): clean native receipts and setup assembly.
@@ -113,8 +171,11 @@ its reboot result is not yet claimed here.
 - [Release plan](RELEASE_PLAN.md): immutable contracts and publication gates.
 
 User installation/uninstallation, PATH/shortcuts and public management flows
-remain user-owned acceptance work. The multi-capacity clean-system matrix,
-legacy Dev-tool guard audit, release/Dev coexistence, complete interrupted
-creation recovery and third-party corresponding-source/license closure are
-not certified by the checks above. No public Release/tag or mainline merge is
-authorized by this record alone.
+remain user-owned acceptance work. The full multi-capacity clean-system matrix,
+complete interrupted-creation recovery and third-party corresponding-source/
+license closure are not all certified by the checks above. On2026-10-01 the
+user explicitly withdrew strict release/Dev isolation and chose same-format
+versioned package development. The former legacy-Dev guard/concurrency matrix
+has not passed and is no longer a candidate/publication gate; basic instance
+safety checks remain. No public Release/tag or mainline merge is authorized
+by this record alone.
