@@ -464,7 +464,8 @@ int wmain(int argc, wchar_t** argv) {
             auto holeOwner = claim_storage(holePath, new_instance_uuid(), "release");
             check(registry.register_installed(holeOwner, nlohmann::json::object(), binding, {}) == "01", "new instance fills smallest ID hole without renumbering existing 02");
             check(registry.instance("02").at("uuid") == uuidB && registry.ordered_ids() == std::vector<std::string>({"01", "02"}), "existing identity stays unchanged and list IDs are ordered");
-            check(registry.delete_instance("01", {}), "temporary reused-ID fixture deletes only its new storage");
+            registry.delete_instance("01", {});
+            check(!fs::exists(holePath) && !registry.state().at("instances").contains("01") && registry.state().at("instances").contains("02"), "temporary reused-ID fixture deletes only its new storage");
             // Fail after external journal: invalid creation time must retain
             // storage, registration and default, then survive reopen/retry.
             registry.set_default("02");
