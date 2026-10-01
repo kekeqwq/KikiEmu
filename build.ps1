@@ -58,7 +58,7 @@ function Get-KikiQemuRecipe {
             [ordered]@{ Name = 'qemu-io-binary-source.patch'; Sha256 = 'c99af88556a20ca7ba5da102fdd7b5a5b08ea41a26992dcc61fc5f72b0252357' }
             [ordered]@{ Name = 'qemu-sdl-boot-console.patch'; Sha256 = '681600b5b06baeb823242e1bb4c3a3358ee50db2dc84dca5392b915049420d3b' }
             [ordered]@{ Name = 'qemu-sdl-channel-title.patch'; Sha256 = 'ad41ebace69e5c6132312c9b41fc1710846ccd7ec4f0478badf53924a8b93239' }
-            [ordered]@{ Name = 'qemu-sdl-managed-close.patch'; Sha256 = '30e9949220f1b9dce41bd61af38065c847ef912bf6cb86eaa0a9b5216299fa43'; Revision = '710172b1a4ee6cbd89eb65f16b762a696e896f53' }
+            [ordered]@{ Name = 'qemu-sdl-managed-close.patch'; Sha256 = '4ea3d3c80c2c21116758e83c3432558a73e416cdb40faf0c93e319caca38c7e9'; Revision = '6af5b5a1fcda7c5888a84533695d8d79153d7dd4' }
         )
         Packages = @(
             'git', 'make', 'ninja',

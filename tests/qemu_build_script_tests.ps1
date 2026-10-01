@@ -71,6 +71,7 @@ $recipe = Get-KikiQemuRecipe
 Check ($recipe.Patches.Count -eq 5) 'all five patches pinned'
 $handoffPatch = Get-Content (Join-Path $project 'patches/qemu-sdl-managed-close.patch') -Raw
 Check ($handoffPatch.Contains('diff --git a/ui/sdl2-gl.c b/ui/sdl2-gl.c')) 'handoff patch covers SDL GL refresh'
+Check ($handoffPatch.Contains('scon->scanout_mode && scon->guest_fb.framebuffer != 0')) 'idle HOME handoff accepts existing valid scanout without guest input'
 Check ($handoffPatch.Contains("-        sdl2_gl_render_surface(scon);`n") -and $handoffPatch.Contains("+        sdl2_gl_redraw(scon);`n")) 'pending refresh uses authoritative scanout, not black software placeholder'
 foreach ($patch in $recipe.Patches) {
     Check ((Get-FileHash -LiteralPath (Join-Path $project "patches/$($patch.Name)")).Hash.ToLowerInvariant() -eq $patch.Sha256) "tracked patch hash: $($patch.Name)"
