@@ -144,3 +144,22 @@ completed by the user alongside installer testing. Installation, PATH,
 shortcuts, public create/set/delete/default and uninstallation remain the
 user's own acceptance work. Outstanding public-release gates stay explicit;
 neither this internal run nor a test handoff is public-release acceptance.
+
+## 2026-10-01 close-button / second-boot regression
+
+The 32-GiB independent fixture used the unchanged clean ZIP SHA-256
+`73a184068b2c1b5576add96bcbadf4621bf3c3998c7f01fffeb624ee44aad42a`.
+It booted three times with the managed-close/overlay-cleanup patch and the
+shared supervisor recipe. Two real Surface-camera captures preceded the
+first SDL WM_CLOSE; a third preceded the next WM_CLOSE. No test-side `sync`
+was injected. Android's serial log recorded `/data` unmount, shutdown sync
+and kernel power down. All three JPEG hashes survived; all decoded as
+640x480 images using an independent Windows decoder after the third boot.
+The second and third boots showed complete HOME in full 2880x1920 Windows
+captures before any guest touch/key injection. Exact session UUIDs:
+`1d2b4f9d-08b4-4e5f-8a94-b07938158d70`,
+`5af12580-d94a-49bd-9173-a582d8c16b64`,
+`d34d1221-7288-4e32-bf28-387f8457e8e5`.
+Only these owned test windows were closed; the user's installed instance,
+QEMU bin, storage and registry were not modified. Updated installer/CLI
+acceptance remains the user's responsibility, not covered by this runner.
