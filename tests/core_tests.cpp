@@ -135,27 +135,37 @@ int wmain(int argc, wchar_t** argv) {
             using detail::ProcessState;
             auto state = ProcessState::exited;
             bool queried = false;
-            check(!detail::verify_live_identity([&] { return state; }, [&] { queried = true; }) && !queried,
+            check(!detail::verify_live_identity([&](bool) { return state; }, [&] { queried = true; }) && !queried,
                   "already signaled pinned process is not queried or adopted");
             state = ProcessState::live;
-            check(detail::verify_live_identity([&] { return state; }, [] {}), "verified live pinned identity remains live");
-            check(!detail::verify_live_identity([&] { return state; }, [&] { state = ProcessState::exited; }),
+            check(detail::verify_live_identity([&](bool) { return state; }, [] {}), "verified live pinned identity remains live");
+            check(!detail::verify_live_identity([&](bool) { return state; }, [&] { state = ProcessState::exited; }),
                   "exit during identity verification is detected on the same handle");
             state = ProcessState::live;
-            check(!detail::verify_live_identity([&] { return state; }, [&] {
+            check(!detail::verify_live_identity([&](bool) { return state; }, [&] {
                 state = ProcessState::exited; throw std::runtime_error("image query raced with exit");
             }), "failed image query is ignored only after the same pinned object signals exit");
             state = ProcessState::live;
-            rejects([&] { detail::verify_live_identity([&] { return state; }, [] { throw std::runtime_error("identity mismatch"); }); },
+            rejects([&] { detail::verify_live_identity([&](bool) { return state; }, [] { throw std::runtime_error("identity mismatch"); }); },
                     "live identity mismatch incorrectly treated as exit");
-            rejects([&] { detail::verify_live_identity([&] { return state; }, [&] {
+            rejects([&] { detail::verify_live_identity([&](bool) { return state; }, [&] {
                 state = ProcessState::failed; throw std::runtime_error("access denied");
             }); }, "unknown wait state incorrectly treated as successful exit");
-            rejects([&] { detail::verify_live_identity([&] { return state; }, [] {}); },
+            rejects([&] { detail::verify_live_identity([&](bool) { return state; }, [] {}); },
                     "initial wait failure incorrectly accepted");
             state = ProcessState::live;
-            rejects([&] { detail::verify_live_identity([&] { return state; }, [&] { state = ProcessState::failed; }); },
+            rejects([&] { detail::verify_live_identity([&](bool) { return state; }, [&] { state = ProcessState::failed; }); },
                     "post-verification wait failure incorrectly accepted");
+            state = ProcessState::live;
+            bool boundedWait = false;
+            check(!detail::verify_live_identity([&](bool allowWait) {
+                if (allowWait) { boundedWait = true; state = ProcessState::exited; }
+                return state;
+            }, [] { throw std::runtime_error("image gone before exit signal"); }) && boundedWait,
+                  "query teardown waits for the same pinned exit signal before accepting exit");
+            state = ProcessState::live; boundedWait = false;
+            check(detail::verify_live_identity([&](bool allowWait) { boundedWait |= allowWait; return state; }, [] {}) && !boundedWait,
+                  "normal live identity checks never use the bounded failure wait");
         }
         check(parse_command({}).name == "help", "empty help");
         check(parse_command({L"--list"}).name == "list", "list alias");

@@ -13,6 +13,11 @@ image. R6 is retained for diagnosis, not recommended for installation. The
 successor will be rebuilt from a new clean commit and recorded separately;
 do not pretend the following R6 bytes include that fix.
 
+The R7 successor's actual shutdown test found the additional teardown interval
+before the process object signals exit. R7 also remains a diagnostic candidate,
+not the final handoff. A bounded wait on the already held process handle is
+required; neither a missing image nor an observation timeout is exit evidence.
+
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
 | `setup.exe` (R6) | 2,076,147 | `ad506a9396cfcd3fddd6c76d961a5fb5076454a68f7801df0ac38b34b176f45a` |

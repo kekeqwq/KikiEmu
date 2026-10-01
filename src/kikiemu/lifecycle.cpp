@@ -42,8 +42,11 @@ void fields(const OwnedProcess& process) {
         throw std::runtime_error("Invalid owned-process record; termination refused.");
 }
 bool verified_live_handle(HANDLE handle, const OwnedProcess& record) {
-    return detail::verify_live_identity([&] {
-        switch (WaitForSingleObject(handle, 0)) {
+    return detail::verify_live_identity([&](bool finishingExit) {
+        // During ExitProcess the image can disappear before the object is
+        // signaled. A bounded one-second wait is safe only on this pinned
+        // handle, not a reopened PID; live failures still throw after it.
+        switch (WaitForSingleObject(handle, finishingExit ? 1000 : 0)) {
         case WAIT_TIMEOUT: return detail::ProcessState::live;
         case WAIT_OBJECT_0: return detail::ProcessState::exited;
         default: return detail::ProcessState::failed;
