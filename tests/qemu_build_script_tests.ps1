@@ -69,6 +69,9 @@ Check ($environment.BASH_ENV -eq $null -and $environment.PYTHONPATH -eq $null) '
 
 $recipe = Get-KikiQemuRecipe
 Check ($recipe.Patches.Count -eq 5) 'all five patches pinned'
+$handoffPatch = Get-Content (Join-Path $project 'patches/qemu-sdl-managed-close.patch') -Raw
+Check ($handoffPatch.Contains('diff --git a/ui/sdl2-gl.c b/ui/sdl2-gl.c')) 'handoff patch covers SDL GL refresh'
+Check ($handoffPatch.Contains("-        sdl2_gl_render_surface(scon);`n") -and $handoffPatch.Contains("+        sdl2_gl_redraw(scon);`n")) 'pending refresh uses authoritative scanout, not black software placeholder'
 foreach ($patch in $recipe.Patches) {
     Check ((Get-FileHash -LiteralPath (Join-Path $project "patches/$($patch.Name)")).Hash.ToLowerInvariant() -eq $patch.Sha256) "tracked patch hash: $($patch.Name)"
 }
@@ -105,7 +108,7 @@ Invoke-KikiBuildProcess $pwsh @('-NoProfile', '-NonInteractive', '-Command',
     ForEach-Object { if ($_.ToString() -eq 'live-before-wait') { $script:liveFirstLine = $script:liveClock.ElapsedMilliseconds -lt 1600 } }
 Check $script:liveFirstLine 'output arrives before child completion'
 
-$git = (Get-Command git.exe -CommandType Application).Source
+$git = (Get-Command git.exe -CommandType Application | Select-Object -First 1).Source
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('kiki-qemu-script-tests-' + [Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($scratch)
 try {

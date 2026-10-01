@@ -41,7 +41,10 @@ Screenshots remain in `C:\Users\keke\Downloads\temp`.
 For 0.2, first reproduce the reported second-boot black screen using the
 public 0.1 package and freshly rebuilt 0.1 consumer/QEMU. Capture readiness,
 power/display/SurfaceFlinger state and the physical desktop before any touch
-or corrective input. Existing 2026-10-01 evidence below does not prove this
+or corrective input. For the black-screen reproduction, capture WITHOUT
+`-Activate`, `-Unobscured` or `-Maximize`: even a non-activating Z-order change
+can cause SDL expose/redraw and hide the bug. Such raised-window screenshots
+are not evidence of automatic overlay-to-desktop handoff. Existing 2026-10-01 evidence below does not prove this
 new regression passes. Then validate the system fix and 7.3-rc5 kernel with
 fresh disks and repeated window-close/reboot cycles. Consumer changes, if
 needed, require their own version and release; system-only changes do not.
