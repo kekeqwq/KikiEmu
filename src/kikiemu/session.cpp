@@ -4,6 +4,7 @@
 #include <windows.h>
 #include "session.hpp"
 #include "disk.hpp"
+#include <cmath>
 #include <fstream>
 #include <optional>
 #include <regex>
@@ -108,10 +109,17 @@ bool launcher_display_ready(const std::string& windows, const std::string& layer
     static const std::regex focusedHome(
         R"((?:^|\n)[ \t]*mCurrentFocus=Window\{[^\r\n]*[ \t]com\.android\.launcher3/(?:com\.android\.launcher3\.uioverrides\.QuickstepLauncher|\.uioverrides\.QuickstepLauncher)(?:[ \t}]|$))");
     static const std::regex active120(
-        R"((?:^|\n)[ \t]*mActiveRenderFrameRate=120(?:\.0+)?[ \t\r]*(?:\n|$))");
+        R"((?:^|\n)[ \t]*mActiveRenderFrameRate=([0-9]+(?:\.[0-9]+)?)[ \t\r]*(?:\n|$))");
+    std::smatch rate;
+    if (!std::regex_search(display, rate, active120) || rate[1].length() > 32) return false;
+    try {
+        // Real Android reports 120.00001 for the 8,333,333-ns 120-Hz mode.
+        // Allow only tiny representation/period rounding, not 120.01 or an
+        // arbitrary supported-mode list that happens to mention 120.
+        if (std::abs(std::stod(rate[1].str()) - 120.0) > 0.0001) return false;
+    } catch (const std::exception&) { return false; }
     return std::regex_search(windows, focusedHome) &&
-        layers.find("com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher") != std::string::npos &&
-        std::regex_search(display, active120);
+        layers.find("com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher") != std::string::npos;
 }
 RuntimePlan runtime_plan(const json& record, const ManagerPaths& paths, const std::string& session,
                          uint16_t adb, uint16_t qmp, uint16_t camera) {

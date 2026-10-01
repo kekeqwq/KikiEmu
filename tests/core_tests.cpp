@@ -644,6 +644,9 @@ int wmain(int argc, wchar_t** argv) {
               "ready gate accepts exact WindowManager Home focus plus actual Home layer and render 120");
         check(launcher_display_ready("mCurrentFocus=Window{abc u0 com.android.launcher3/.uioverrides.QuickstepLauncher}\r\n",
                                      homeLayers, "mActiveRenderFrameRate=120\r\n"), "ready gate supports canonical abbreviated component and CRLF");
+        for (const auto& rate : {"120.00001", "119.99999"})
+            check(launcher_display_ready(homeWindow, homeLayers, "mActiveRenderFrameRate=" + std::string(rate) + "\n"),
+                  "ready gate accepts actual Android 120-Hz period representation rounding");
         check(!launcher_display_ready("ResumedActivity: ActivityRecord{abc u0 com.android.launcher3/.uioverrides.QuickstepLauncher}\n",
                                       homeLayers, "mActiveRenderFrameRate=120\n"), "activity-only evidence is not WindowManager focus");
         check(!launcher_display_ready("mCurrentFocus=null\n", homeLayers, "mActiveRenderFrameRate=120\n"), "null focus cannot expose desktop");
@@ -651,7 +654,8 @@ int wmain(int argc, wchar_t** argv) {
                                       "mActiveRenderFrameRate=120\n"), "stale Home layer cannot override a different focused application");
         check(!launcher_display_ready(homeWindow, "SurfaceFlinger layer list unavailable", "mActiveRenderFrameRate=120\n"),
               "focused Home without actual compositor layer is not ready");
-        for (const auto& rate : {"60", "1200", "120.01", "120.0Hz"})
+        for (const auto& rate : {"60", "1200", "120.01", "120.0Hz", "120.00011", "119.99989", "1.2e2", "NaN", "Infinity",
+                                 "000000000000000000000000000000000120"})
             check(!launcher_display_ready(homeWindow, homeLayers, "mActiveRenderFrameRate=" + std::string(rate) + "\n"),
                   "ready gate refuses non-120 or malformed active render rates");
         check(plan.serial == "kiki-release-" + createdOwner.instanceUuid && plan.environment.at(L"KIKI_SDL_WINDOW_TITLE") == L"KikiEmu",
