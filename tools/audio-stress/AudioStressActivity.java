@@ -91,12 +91,14 @@ public final class AudioStressActivity extends Activity {
         try {
             // MODE_STATIC is STATE_NO_STATIC_DATA until the first successful write.
             if(t.write(bytes,0,bytes.length)!=bytes.length || t.getState()!=AudioTrack.STATE_INITIALIZED) throw new IllegalStateException("AudioTrack setup failed");
-            report("START i="+index+" rate="+rate+" channels="+channels+" duration="+millis); t.play();
-            long until=SystemClock.elapsedRealtime()+8000; int expected=bytes.length/(channels*2);
+            report("START i="+index+" rate="+rate+" channels="+channels+" duration="+millis);
+            long started=SystemClock.elapsedRealtime(); t.play();
+            long until=started+8000; int expected=bytes.length/(channels*2);
             while(t.getPlaybackHeadPosition()<expected && SystemClock.elapsedRealtime()<until) Thread.sleep(10);
             int frames=t.getPlaybackHeadPosition();
             report("COMPLETE i="+index+" frames="+frames+" expected="+expected+" underruns="+t.getUnderrunCount());
             if(frames<expected) throw new IllegalStateException("AudioTrack head stalled");
+            if(index==9999 && SystemClock.elapsedRealtime()-started<millis/2) throw new IllegalStateException("Reference head advanced implausibly fast (HAL may be discarding PCM)");
             t.stop();
         } finally { t.release(); }
     }
