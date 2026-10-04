@@ -97,3 +97,5 @@
 !/tools/probe_wgl_adreno.c
 !/tools/gpu-bench/
 !/tools/gpu-bench/**
+!/tools/audio-stress/
+!/tools/audio-stress/**

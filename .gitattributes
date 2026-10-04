@@ -3,6 +3,7 @@
 /patches/*.patch text eol=lf whitespace=-blank-at-eol
 /tools/*.sh text eol=lf
 /tools/*.ps1 text eol=lf
+/tools/audio-stress/** text eol=lf
 /build.ps1 text eol=lf
 /prepare.ps1 text eol=lf
 /profiles/*.json text eol=lf
