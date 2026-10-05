@@ -4,6 +4,9 @@
 !/.gitignore
 !/.gitattributes
 !/README.md
+!/docs/
+/docs/*
+!/docs/INCREMENTAL_OTA_DESIGN.md
 !/GPU_ACCELERATION.md
 !/CAMERA_SUPPORT.md
 !/BASELINE_20260930.md

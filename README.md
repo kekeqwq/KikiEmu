@@ -5,12 +5,16 @@
 | 仓库 | 职责 |
 | --- | --- |
 | [kikiaosp_test](https://github.com/kekeqwq/kikiaosp_test) | Android 17 设备树、AOSP 集成补丁、源码审计、system/vendor 镜像；维护系统安装包标准与干净发行规划 |
-| [kikiaosp_kernel](https://github.com/kekeqwq/kikiaosp_kernel) | Linux 7.3-rc4 4 KiB 内核与 Nix 构建 |
+| [kikiaosp_kernel](https://github.com/kekeqwq/kikiaosp_kernel) | Linux 7.3 系列 4 KiB 内核与固定来源的 Nix 构建 |
 | 本仓库 | Windows ARM64 QEMU 补丁及构建、摄像头桥接、开发镜像收集/启动/测试；终端用户配置管理器、系统安装器与桌面启动入口 |
 
 ## 0.2 Alpha
 
 **本次需要同步更新 setup.exe 和 QEMU 五补丁构建，再用新系统 ZIP 新建实例。** 已有实例不会自动升级系统或内核。下载、准确构建来源、编号复用规则与验收边界见 [0.2 Alpha 发布说明](RELEASE_0_2_ALPHA.md)。0.1 标签和附件保持不变。
+
+## 0.3：音频验收、rc6 与增量 OTA 设计（未发布）
+
+用户长时播放验收未再失声，约 1% 短暂破音暂列已知问题，音频不再继续修改。Linux 7.3-rc6 在独立分支构建、验证；没有修改已发布资产。以 0.2 为长期基底的小更新包、0.2→0.3/0.5 直达差分、磁盘代际事务、数据回滚和 CLI 契约见 [增量 OTA 设计](docs/INCREMENTAL_OTA_DESIGN.md)。**这是设计，当前已发布启动器尚无 `update` 命令，也没有可安装的 OTA；不对正式实例原位改盘。**
 
 ## 0.1 Alpha 与后续开发
 
