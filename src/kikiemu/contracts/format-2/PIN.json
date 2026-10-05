@@ -3,7 +3,6 @@
   "formatVersion": 2,
   "files": {
     "manifest.schema.json": "aa33ca2dbd610da214719d08af05eba9d2cb8a9ec5bce9a6865c2364c08d1ed6",
-    "PIN.json": "ebc300ed6978b3d7c7cd6de8351e50739cf14f7cb439ffa09b3a30e3750387b9",
     "source-lock.schema.json": "0e136c095d8a111a123966931375f822ac551bb82cf4b2e4cbba12e55031c337"
   }
 }
