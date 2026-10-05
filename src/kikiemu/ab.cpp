@@ -32,7 +32,11 @@ std::array<unsigned char,512> read_control(const nlohmann::json& b,const fs::pat
 void write_control(const nlohmann::json& b,const fs::path& d,const nlohmann::json& l,const fs::path& file,const std::array<unsigned char,512>& bytes){
  if(fs::exists(file))throw std::runtime_error("A/B control write file exists.");std::ofstream out(file,std::ios::binary);out.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());out.close();if(!out)throw std::runtime_error("Could not stage A/B control sector.");
  auto off=partition(l,"misc").at("offsetBytes").get<uint64_t>()+2048;
- tool(b,d,{L"-f",L"qcow2",L"-c",L"write -q -s \""+fs::relative(file,d).generic_wstring()+L"\" "+std::to_wstring(off)+L" 512",L"phone.qcow2"},L"qemu-io.exe");
+ // qemu-io's command tokenizer does not remove quotes from -s filenames.
+ // This path is generated from the owned UUID log tree, not user input.
+ auto source=fs::relative(file,d).generic_wstring();
+ if(source.empty()||source.find_first_not_of(L"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._/-")!=std::wstring::npos)throw std::runtime_error("Unsafe A/B sector staging path.");
+ tool(b,d,{L"-f",L"qcow2",L"-c",L"write -q -s "+source+L" "+std::to_wstring(off)+L" 512",L"phone.qcow2"},L"qemu-io.exe");
  auto actual=read_control(b,d,l,file.parent_path()/"bcb-readback.bin");if(actual!=bytes)throw std::runtime_error("A/B control write verification failed.");fs::remove(file);
 }
 }
