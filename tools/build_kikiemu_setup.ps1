@@ -75,7 +75,7 @@ foreach ($directory in (Get-ChildItem -LiteralPath $licenseRoot -Recurse -Direct
 $setup = Join-Path $output 'setup.exe'
 & $make /WX /V3 "/DPAYLOAD=$payload" "/DOUTPUT=$setup" (Join-Path $repoRoot 'installer/kikiemu.nsi')
 if ($LASTEXITCODE -ne 0) { throw 'NSIS compilation failed. Generated setup was NOT executed.' }
-$record = [ordered]@{ version = '0.2.0-alpha'; status = 'compiled-candidate-not-user-accepted'; sourceCommit = $commit;
+$record = [ordered]@{ version = '0.3.0-alpha'; status = 'compiled-candidate-not-user-accepted'; sourceCommit = $commit;
     buildReceipts = @{ core = $coreReceipt; camera = $cameraReceipt }; combinedBinaryLicense = 'GPL-3.0';
     installerStub = 'x86-unicode'; installedApplications = 'native-arm64'; payload = @{}; setupSha256 = (Get-FileHash -LiteralPath $setup).Hash.ToLowerInvariant() }
 foreach ($file in Get-ChildItem -LiteralPath $payload -Recurse -File) {

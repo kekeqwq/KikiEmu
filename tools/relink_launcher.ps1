@@ -16,7 +16,7 @@ if ((& $compiler -dumpmachine).Trim() -ne 'aarch64-w64-windows-gnu') { throw 'Us
 $output=[IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) { throw 'Relinking requires a NEW output directory.' }
 [void][IO.Directory]::CreateDirectory($output)
-$objects=@('config','runtime','process','child','transport','boot','disk','storage','lifecycle','registry','schema','package','manager','session','installation') |
+$objects=@('config','runtime','process','child','transport','boot','disk','storage','lifecycle','registry','schema','package','ab','manager','session','installation') |
     ForEach-Object {Join-Path $kit "objects/$_.o"}
 $resource=Join-Path $kit 'objects/app-resource.o'
 $search=@()

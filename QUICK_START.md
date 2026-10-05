@@ -132,8 +132,10 @@ Platform Tools and selects the recorded instance directly.
 
 ## Future development and system versions
 
-As agreed on 2026-10-01, subsequent fixes are built and tested as ordinary
-versioned packages in the **same format**, then advance to 0.2, 0.3 and so on.
+The published 0.1/0.2 packages use the historical format-1 disk layout.
+The private 0.3 candidate introduces a NEW format-2 physical A/B baseline;
+it does not convert or erase an existing 0.2 instance. No 0.3 public Release
+is available yet.
 A separate Dev channel/registry/launcher and mandatory release/Dev concurrency
 test are no longer required. The existing per-instance UUID, process and
 endpoint checks remain: this is simpler development, not permission to stop
@@ -143,6 +145,30 @@ Test a new system ZIP in a NEW storage folder with `create`, and select its
 explicit instance ID. In 0.1, `set` changes resources/QEMU only; it does not
 replace an installed OS or resize a disk. Published assets remain immutable;
 a repair is a new version, not new bytes under an old version's filename.
+
+## Native updates (NEW 0.3 A/B instances only)
+
+Open Android **Settings > System > System update**. The English updater checks
+`kekeqwq/kikiaosp_test` GitHub Releases and selects the highest compatible,
+publisher-signed sequence automatically. Choose **Download and install**,
+then **Restart to finish**. Apps, settings and shared userdata are retained;
+you do not choose a source/target version pair or create a new instance.
+
+The CLI uses the same KikiUpdater / Android update_engine:
+
+```powershell
+kikiemu update --id 01 --action check
+kikiemu update --id 01 --action status
+# Optional offline delivery of an independently publisher-signed FULL OTA:
+kikiemu update --id 01 --action apply --package "$HOME/Downloads/update.ota.zip"
+kikiemu update --id 01 --action reboot
+```
+
+An import acknowledgement means the updater saved its private copy, not that
+verification or installation finished. Check status before restarting.
+Do not use `create`, `delete`, disk replacement or a userdata reset to update.
+System-slot fallback is not a rollback of app databases; back up important data.
+The current alpha is userdebug/unlocked, not an AVB/GKI/VTS certification.
 
 ## Delete versus uninstall
 

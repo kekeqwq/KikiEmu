@@ -55,9 +55,9 @@ A/B 回退系统槽不自动回退数据库迁移，发行方须验证数据兼�
 ## 验收状态
 
 宿主实际编译通过 344 个内部 core checks。NEW format-2 候选已真实 READY，Settings 与 CLI 共用原生引擎。
-同一个 32 GiB 实例已实际安装 publisher-signed FULL OTA：NONRELEASE sequence 1→2→3，
-冷重启槽 A→B→A，新槽 successful、目标序列确认、pending/stage 清理；未重建实例或格式化 userdata。
-测试 APK 字节/UID、应用私有数据、文件、font_scale、旋转设置和自定义设置跨两次真实升级保持。
+同一个 32 GiB 实例已实际安装 publisher-signed FULL OTA：NONRELEASE sequence 1→2→3→4，
+冷重启槽 A→B→A→B，新槽 successful、目标序列确认、pending/stage 清理；未重建实例或格式化 userdata。
+测试 APK 字节/UID、应用私有数据、文件、font_scale、旋转设置和自定义设置跨真实升级、安装中断、系统槽回退和恢复升级保持。
 前置认证坏签名、已签名错误 device/layout 和 downgrade 已拒绝；不把这些当 native payload-signature 负向验收。
 
 更新页面、通知及错误为英文。实际用户发现导航栏挡住按钮、浅色状态栏图标不可读后，
@@ -65,8 +65,18 @@ A/B 回退系统槽不自动回退数据库迁移，发行方须验证数据兼�
 浅色和深色均有实际截图/Activity view bounds 验证；最后按钮底部 1441px，小于导航栏顶部 1470px。
 已恢复原浅色模式，留下运行中的候选供人工确认，没有 updater APK overlay 冒充系统升级。
 
-仍待独立真实门禁：安装中断续装、坏 native payload signature、失败槽回退/两槽损坏、低空间。
-首次低空间 harness 未制造出低空间，实际走了正常成功安装；此项不算 PASS。
+后续真实门禁已通过：
+
+- 原生 metadata signature 单字节损坏，外层目录仍有有效 publisher 签名且 SHA/长度正确；update_engine 使用专属证书库实际拒绝，错误 26。
+- 真实低空间：写入生成填充文件、确认剩余约 1.1 GiB，private 第二份持久复制 ENOSPC；未 ACK、inbox 保留、private stage 清理，没有提交引擎或清 userdata。
+  早期 harness 的 Android mksh 32 位容量算术溢出已纠正，失败尝试不计 PASS。
+- 安装进行中约 9% 使用原生 suspend 注入中断，再正常关机冷重启；真实引擎从 59/513 operations / 70,264,712 bytes 续装，不是从头安装或重建盘。
+- 活跃事务重复提交拒绝，原 pending/stage 不丢失；已接受序列重复/降级拒绝。
+- 已安装但尚未启动的备用槽 boot header 故障注入：宿主拒绝损坏 boot、标坏 B 槽并实际回退 A，rollback=1，用户数据保持、pending 清理。
+  之后重新提交同一有效 sequence 4 FULL，由原生引擎修复备用槽并成功启动 B；没有重置 acceptedSequence。
+- 两槽 priority 都不可启动：宿主在启动 QEMU 前拒绝且保盘。仅还原测试前备份的标准 BCB 512B、读回验证，原实例及数据恢复；此恢复是开发测试撤销，不是对外第二套 OTA flasher。
+
+仍未实际验收：断电/强制宿主崩溃、两个 boot image 同时损坏、userdata mount-failure no-wipe 故障。
 GitHub 自动检查实际无新已签名候选路径通过；未创建公开测试 Release，正向在线自动下载路径未实际验收。
 签名/打包/VINTF、真实安装、UI 显示与用户人工确认分别记录；不把运行候选当全部发布门禁通过。
 没有 main/tag/公开 Release 或 setup 执行授权。

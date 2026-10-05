@@ -42,7 +42,7 @@ $own=Join-Path $kit 'KikiEmu-source.zip'
 & git -C $repo archive --format=zip -o $own $revision
 if ($LASTEXITCODE -ne 0) { throw 'Project source export failed.' }
 foreach ($directory in @('objects','libraries','runtime')) { [void][IO.Directory]::CreateDirectory((Join-Path $kit $directory)) }
-$objects=@('config','runtime','process','child','transport','boot','disk','storage','lifecycle','registry','schema','package','manager','session','installation','cli','desktop','setup_helper','app-resource','surface_camera_bridge','surface_camera_winrt')
+$objects=@('config','runtime','process','child','transport','boot','disk','storage','lifecycle','registry','schema','package','ab','manager','session','installation','cli','desktop','setup_helper','app-resource','surface_camera_bridge','surface_camera_winrt')
 foreach ($name in $objects) { Copy-Item -LiteralPath (Join-Path $core "$name.o") -Destination (Join-Path $kit 'objects') }
 foreach ($name in @('archive','bz2','lzma','b2','lz4','zstd','crypto','iconv','charset','expat','pcre2-posix','pcre2-8')) {
     Copy-Item -LiteralPath (Join-Path $prefix "lib/lib$name.a") -Destination (Join-Path $kit 'libraries')
@@ -50,7 +50,7 @@ foreach ($name in @('archive','bz2','lzma','b2','lz4','zstd','crypto','iconv','c
 Copy-Item -LiteralPath (Join-Path $prefix 'lib/libz.dll.a') -Destination (Join-Path $kit 'libraries')
 Copy-Item -LiteralPath (Join-Path $core 'zlib1.dll') -Destination (Join-Path $kit 'runtime')
 # Public provenance contains no developer home paths or credentials.
-$provenance=[ordered]@{version='0.2.0-alpha'; sourceCommit=$revision; compiler=$candidate.buildReceipts.core.compiler;
+$provenance=[ordered]@{version='0.3.0-alpha'; sourceCommit=$revision; compiler=$candidate.buildReceipts.core.compiler;
     target='aarch64-w64-windows-gnu'; setupSha256=$candidate.setupSha256; sourceArchiveSha256=(Get-FileHash $own).Hash.ToLowerInvariant();
     dependencies=$records; objects=@{}; libraries=@{}}
 foreach ($section in @('objects','libraries')) {
@@ -58,7 +58,7 @@ foreach ($section in @('objects','libraries')) {
 }
 [IO.File]::WriteAllText((Join-Path $kit 'source-provenance.json'),($provenance|ConvertTo-Json -Depth 12)+"`n")
 Copy-Item -LiteralPath (Join-Path $repo 'LICENSING.md') -Destination $kit
-$archive=Join-Path $output 'KikiEmu-0.2.0-alpha-source-kit.tar.gz'
+$archive=Join-Path $output 'KikiEmu-0.3.0-alpha-source-kit.tar.gz'
 & $tar -czf $archive -C $output source-kit
 if ($LASTEXITCODE -ne 0) { throw 'Source kit compression failed.' }
 Write-Host "Source, dependency archives and relinkable application objects: $archive"
