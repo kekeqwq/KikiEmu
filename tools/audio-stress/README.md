@@ -22,6 +22,8 @@ accepts intent extras `mode`, `count` (1..2000) and `gap` (0..10000 ms):
 Clips are 100..500 ms with 10-ms ramps. Every 40 clips has a four-second idle
 (or PCM silence for `hold`). A final 2-second static track is a separate probe.
 Events are logged to `KikiAudioStress` and external-files `events.log`.
+The final reference rejects a playback head claiming two seconds in under
+one second (a failed persistent stream can otherwise appear to complete).
 Do not check MODE_STATIC's state before its first write: it starts in
 STATE_NO_STATIC_DATA, not STATE_INITIALIZED.
 
@@ -58,3 +60,18 @@ owned private shell, and verifies its guest SHA-256 at the fixed destination
 candidate. It does NOT mount it, restart services, modify immutable images or
 use/start a host ADB daemon. Every command revalidates QEMU/endpoint ownership.
 Any runtime overlay is a private experiment, not release-package validation.
+
+`qemu-capture.exe FIXTURE_ROOT RUNNER_APP_ROOT SECONDS` independently captures
+the owned QEMU's MIXER output through QMP/HMP. It verifies the exact QEMU and
+OS endpoint ownership before each command; refuses any existing capture. A
+NEW UUID-named, storage-marked subdirectory under the fixture contains
+`ownership.json` and `qemu.wav`. It never accepts an arbitrary monitor/port,
+changes a backend/volume or writes outside the private fixture. It stops only
+its matching capture and checks final stop status. SIGKILL/tool timeouts can
+interrupt cleanup: inspect that run's ownership record before resuming.
+
+This uses deprecated HMP `wavcapture` supported by the tested QEMU commit;
+future QEMU may remove it. Mixer capture is upstream of SDL/Windows and can
+help distinguish lost guest/backend samples from loopback packet gaps. It is
+not physical-speaker proof, and enabling capture itself can affect timing.
+Compare to a separate uninstrumented run, not just this one.

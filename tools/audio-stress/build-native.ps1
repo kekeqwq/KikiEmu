@@ -21,12 +21,12 @@ New-Item -ItemType Directory -Path $out|Out-Null
 $oldPath=$env:PATH
 try {
     $env:PATH=(Join-Path $Msys2Root 'clangarm64/bin')+';'+$oldPath
-    foreach($tool in @(@('process_loopback.cpp','process-loopback.exe'),@('guest_stage.cpp','guest-stage.exe'))) {
+    foreach($tool in @(@('process_loopback.cpp','process-loopback.exe'),@('guest_stage.cpp','guest-stage.exe'),@('qemu_capture.cpp','qemu-capture.exe'))) {
         & $compiler -std=c++20 -O2 -Wall -Wextra -static -municode (Join-Path $PSScriptRoot $tool[0]) @objects -o (Join-Path $out $tool[1]) @libs
         if($LASTEXITCODE -ne 0){throw "Native audio-test build failed: $($tool[0])"}
     }
     Copy-Item (Join-Path $native 'zlib1.dll') $out
     Copy-Item $receipt (Join-Path $out 'input-core-build-receipt.json')
-    $hashes=foreach($p in @($objects)+@((Join-Path $out 'process-loopback.exe'),(Join-Path $out 'guest-stage.exe'))) { [ordered]@{path=$p;sha256=(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant()} }
+    $hashes=foreach($p in @($objects)+@((Join-Path $out 'process-loopback.exe'),(Join-Path $out 'guest-stage.exe'),(Join-Path $out 'qemu-capture.exe'))) { [ordered]@{path=$p;sha256=(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant()} }
     $hashes|ConvertTo-Json -Depth 4|Set-Content -Encoding utf8 (Join-Path $out 'build-hashes.json')
 } finally {$env:PATH=$oldPath}

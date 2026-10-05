@@ -136,13 +136,25 @@ int wmain(int argc,wchar_t** argv) {
         checked(completion->result,"Activated");
         auto client=completion->client;
         WAVEFORMATEX format{WAVE_FORMAT_PCM,2,48000,192000,4,16,0};
-        checked(client->Initialize(AUDCLNT_SHAREMODE_SHARED,AUDCLNT_STREAMFLAGS_LOOPBACK|AUDCLNT_STREAMFLAGS_EVENTCALLBACK|AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,0,0,&format,nullptr),"Initialize");
+        checked(client->Initialize(AUDCLNT_SHAREMODE_SHARED,AUDCLNT_STREAMFLAGS_LOOPBACK|AUDCLNT_STREAMFLAGS_EVENTCALLBACK|AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,2000000,0,&format,nullptr),"Initialize");
+        UINT32 capacity=0; checked(client->GetBufferSize(&capacity),"BufferSize");
+        std::cout<<"PROCESS_LOOPBACK_BUFFER frames="<<capacity<<" requested_ms=200"<<std::endl;
         HANDLE event=CreateEventW(nullptr,FALSE,FALSE,nullptr); checked(client->SetEventHandle(event),"SetEvent");
         ComPtr<IAudioCaptureClient> capture; checked(client->GetService(__uuidof(IAudioCaptureClient),reinterpret_cast<void**>(capture.GetAddressOf())),"CaptureClient");
         NewFile wav(output),csv(fs::path(output.wstring()+L".csv"));
         uint8_t header[44]{}; wav.write(header,44);
         std::string csvHeader="host_tick_ms,device_frames,qpc_100ns,frames,flags,rms,peak\n";
         csv.write(csvHeader.data(),DWORD(csvHeader.size()));
+        // Virtual process loopback exposes a 10-ms capture buffer. Schedule
+        // ONLY this recorder thread through MMCSS to avoid losing packets to
+        // ordinary host scheduling; no endpoint/volume/global settings.
+        HMODULE avrt=LoadLibraryExW(L"avrt.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
+        using AvSet=HANDLE (WINAPI*)(LPCWSTR,LPDWORD);
+        using AvRevert=BOOL (WINAPI*)(HANDLE);
+        auto avSet=avrt?reinterpret_cast<AvSet>(GetProcAddress(avrt,"AvSetMmThreadCharacteristicsW")):nullptr;
+        auto avRevert=avrt?reinterpret_cast<AvRevert>(GetProcAddress(avrt,"AvRevertMmThreadCharacteristics")):nullptr;
+        DWORD task=0; HANDLE scheduling=avSet&&avRevert?avSet(L"Audio",&task):nullptr;
+        if(!scheduling)throw std::runtime_error("Cannot schedule owned capture thread");
         checked(client->Start(),"Start");auto start=GetTickCount64();uint64_t samples=0;
         std::cout<<"PROCESS_LOOPBACK_STARTED pid="<<target.pid<<" tick="<<start<<" seconds="<<seconds<<std::endl;
         while(GetTickCount64()-start<uint64_t(seconds)*1000 && WaitForSingleObject(pin,0)==WAIT_TIMEOUT) {
@@ -162,6 +174,8 @@ int wmain(int argc,wchar_t** argv) {
             }
         }
         checked(client->Stop(),"Stop");
+        if(!avRevert(scheduling))throw std::runtime_error("Cannot restore recorder scheduling");
+        FreeLibrary(avrt);
         inspect_volumes(target.pid);
         uint32_t bytes=uint32_t(samples*4);std::memcpy(header,"RIFF",4);uint32_t length=36+bytes;std::memcpy(header+4,&length,4);std::memcpy(header+8,"WAVEfmt ",8);length=16;std::memcpy(header+16,&length,4);std::memcpy(header+20,&format,16);std::memcpy(header+36,"data",4);std::memcpy(header+40,&bytes,4);
         wav.rewind();wav.write(header,44);wav.flush();csv.flush();CloseHandle(event);CloseHandle(pin);
