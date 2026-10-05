@@ -32,15 +32,22 @@ static std::string new_uuid() {
     return result;
 }
 DiskLayout plan_disk(uint64_t totalBytes, const std::map<std::string, uint64_t>& payloadBytes,
-                     uint64_t minimumDataBytes) {
+                     uint64_t minimumDataBytes, bool nativeAb) {
     if (payloadBytes.size() != 3 || !payloadBytes.contains("boot") || !payloadBytes.contains("system") || !payloadBytes.contains("vendor"))
         throw std::runtime_error("GPT-v1 requires exactly boot, system and vendor payloads.");
     if (totalBytes > uint64_t(std::numeric_limits<int64_t>::max()) || totalBytes % MiB || totalBytes < 4 * MiB)
         throw std::runtime_error("Total disk size must be MiB-aligned and within the supported range.");
     DiskLayout layout{new_uuid(), totalBytes, {}};
     uint64_t next = MiB;
-    for (const auto& name : {"boot", "system", "vendor", "misc"}) {
-        uint64_t bytes = std::string(name) == "misc" ? 4 * MiB : payloadBytes.at(name);
+    const std::vector<std::string> names = nativeAb ? std::vector<std::string>{"boot_a", "system_a", "vendor_a", "boot_b", "system_b", "vendor_b", "misc"} : std::vector<std::string>{"boot", "system", "vendor", "misc"};
+    for (const auto& name : names) {
+        auto role = name == "misc" ? name : (nativeAb ? name.substr(0, name.size() - 2) : name);
+        uint64_t bytes = role == "misc" ? 4 * MiB : payloadBytes.at(role);
+        if (nativeAb && role != "misc") {
+            uint64_t capacity = role == "boot" ? 64 * MiB : (role == "system" ? 4096 * MiB : 512 * MiB);
+            if (bytes > capacity) throw std::runtime_error("Image exceeds the native A/B slot budget.");
+            bytes = capacity;
+        }
         if (!bytes || bytes % 4096) throw std::runtime_error("Boot and EROFS payloads must be nonempty and 4-KiB-aligned.");
         uint64_t length = align_up(bytes);
         if (length > totalBytes || next > totalBytes - length) throw std::runtime_error("Total capacity is too small for the system partitions.");
@@ -53,7 +60,7 @@ DiskLayout plan_disk(uint64_t totalBytes, const std::map<std::string, uint64_t>&
     return layout;
 }
 json layout_json(const DiskLayout& layout) {
-    json result = {{"layoutVersion", "gpt-v1"}, {"sectorSizeBytes", 512}, {"alignmentBytes", MiB},
+    json result = {{"layoutVersion", layout.partitions.size() == 8 ? "gpt-ab-v1" : "gpt-v1"}, {"sectorSizeBytes", 512}, {"alignmentBytes", MiB},
                    {"diskUuid", layout.uuid}, {"totalBytes", layout.totalBytes}, {"partitions", json::array()}};
     for (const auto& partition : layout.partitions) result["partitions"].push_back({
         {"name", partition.name}, {"uuid", partition.uuid}, {"offsetBytes", partition.offsetBytes}, {"lengthBytes", partition.lengthBytes}});
@@ -134,7 +141,7 @@ static void check_image_header(const std::string& role, const fs::path& file) {
 }
 json install_disk(const json& binding, const fs::path& newDirectory, uint64_t totalBytes,
                   const std::map<std::string, fs::path>& payloads, uint64_t minimumDataBytes,
-                  const std::map<std::string, std::string>& manifestHashes, const Progress& progress) {
+                  const std::map<std::string, std::string>& manifestHashes, const Progress& progress, bool nativeAb) {
     report(progress, "Validating QEMU image tools and installation payloads.");
     verify_qemu_binding(binding);
     auto directory = normalize_directory(newDirectory.wstring());
@@ -150,7 +157,7 @@ json install_disk(const json& binding, const fs::path& newDirectory, uint64_t to
         if (!manifestHashes.empty() && (!manifestHashes.contains(role) || validatedHashes.at(role) != manifestHashes.at(role)))
             throw std::runtime_error("Installation input differs from the verified manifest; no disk was created.");
     }
-    auto layout = plan_disk(totalBytes, lengths, minimumDataBytes);
+    auto layout = plan_disk(totalBytes, lengths, minimumDataBytes, nativeAb);
     auto bin = fs::path(utf16(binding.at("binDirectory").get<std::string>()));
     fs::create_directories(directory);
     report(progress, "Creating a " + std::to_string(totalBytes >> 30) + " GiB dynamic disk (no preallocation).");
@@ -188,25 +195,34 @@ json install_disk(const json& binding, const fs::path& newDirectory, uint64_t to
     auto record = layout_json(layout);
     record["payloads"] = json::array();
     for (const auto& partition : layout.partitions) {
-        auto found = payloads.find(partition.name);
+        auto role = nativeAb && (partition.name.ends_with("_a") || partition.name.ends_with("_b")) ? partition.name.substr(0, partition.name.size() - 2) : partition.name;
+        auto found = payloads.find(role);
         if (found == payloads.end()) continue; // Fresh misc/data remain all zero.
-        auto expected = validatedHashes.at(partition.name);
-        if (sha256(found->second) != expected || fs::file_size(found->second) != lengths.at(partition.name))
+        auto expected = validatedHashes.at(role);
+        if (sha256(found->second) != expected || fs::file_size(found->second) != lengths.at(role))
             throw std::runtime_error("Installation input changed before import; instance was not registered.");
         std::ifstream stream(found->second, std::ios::binary);
         uint64_t written = 0;
         report(progress, "Importing " + partition.name + " with disk readback verification.");
-        while (written < lengths.at(partition.name)) {
-            size_t count = static_cast<size_t>(std::min<uint64_t>(16 * MiB, lengths.at(partition.name) - written));
+        while (written < lengths.at(role)) {
+            size_t count = static_cast<size_t>(std::min<uint64_t>(16 * MiB, lengths.at(role) - written));
             std::vector<unsigned char> bytes(count);
             if (!stream.read(reinterpret_cast<char*>(bytes.data()), bytes.size())) throw std::runtime_error("Could not read the installation payload.");
             write_and_verify(partition.offsetBytes + written, bytes);
             written += bytes.size();
-            report(progress, "  " + partition.name + ": " + std::to_string(written * 100 / lengths.at(partition.name)) + "% (" +
-                std::to_string(written) + "/" + std::to_string(lengths.at(partition.name)) + " bytes)");
+            report(progress, "  " + partition.name + ": " + std::to_string(written * 100 / lengths.at(role)) + "% (" +
+                std::to_string(written) + "/" + std::to_string(lengths.at(role)) + " bytes)");
         }
         if (sha256(found->second) != expected) throw std::runtime_error("Installation input changed during import.");
         record["payloads"].push_back({{"role", partition.name}, {"bytes", written}, {"sha256", expected}});
+    }
+    if (nativeAb) {
+        std::vector<unsigned char> control(4096, 0);
+        std::memcpy(control.data() + 2048, "_a", 2);
+        integer(control, 2052, 0x42414342, 4); control[2056] = 1; control[2057] = 2;
+        control[2060] = 0x7f; control[2062] = 0x7e;
+        integer(control, 2076, crc32(control.data() + 2048, 28), 4);
+        write_and_verify(layout.partitions[6].offsetBytes, control);
     }
     report(progress, "Checking QCOW2 consistency and extracting the installed boot payload.");
     tool(L"qemu-img.exe", {L"check", L"-f", L"qcow2", L"phone.qcow2"});
@@ -218,6 +234,10 @@ json install_disk(const json& binding, const fs::path& newDirectory, uint64_t to
         throw std::runtime_error("Installed boot partition identity changed before cache generation.");
     report(progress, "Deriving the kernel/initramfs boot cache from the installed disk.");
     record["directBoot"] = derive_boot_cache(directory / "installed-boot.bin", directory / "boot");
+    if (nativeAb) {
+        std::ofstream token(directory / "userdata-uninitialized.json");token << json{{"diskUuid",layout.uuid}}.dump() << '\n';
+        if (!token) throw std::runtime_error("Could not record NEW native userdata initialization token.");
+    }
     fs::remove(directory / "installed-boot.bin");
     record["diskFile"] = "phone.qcow2";
     record["status"] = "installed-not-booted; GPT/fresh-data acceptance still required";
@@ -230,14 +250,15 @@ json install_disk(const json& binding, const fs::path& newDirectory, uint64_t to
 }
 void verify_installed_disk(const json& binding, const fs::path& directory, const json& installed, const fs::path& scratch) {
     verify_qemu_binding(binding);
-    if (installed.at("layoutVersion") != "gpt-v1" || installed.at("sectorSizeBytes") != 512 ||
+    bool nativeAb = installed.at("layoutVersion") == "gpt-ab-v1";
+    if ((!nativeAb && installed.at("layoutVersion") != "gpt-v1") || installed.at("sectorSizeBytes") != 512 ||
         installed.at("alignmentBytes") != MiB || installed.at("diskFile") != "phone.qcow2" ||
-        installed.at("partitions").size() != 5 || !installed.at("totalBytes").is_number_unsigned())
+        installed.at("partitions").size() != (nativeAb ? 8 : 5) || !installed.at("totalBytes").is_number_unsigned())
         throw std::runtime_error("Unsupported installed disk record.");
     DiskLayout layout{installed.at("diskUuid").get<std::string>(), installed.at("totalBytes").get<uint64_t>(), {}};
     if (!valid_instance_uuid(layout.uuid) || layout.totalBytes > INT64_MAX || layout.totalBytes < (8ULL << 30) ||
         layout.totalBytes % (1ULL << 30)) throw std::runtime_error("Invalid immutable disk capacity/UUID.");
-    const std::array<const char*, 5> roles{"boot", "system", "vendor", "misc", "userdata"};
+    const std::vector<std::string> roles = nativeAb ? std::vector<std::string>{"boot_a", "system_a", "vendor_a", "boot_b", "system_b", "vendor_b", "misc", "userdata"} : std::vector<std::string>{"boot", "system", "vendor", "misc", "userdata"};
     uint64_t next = MiB;
     for (size_t i = 0; i < roles.size(); ++i) {
         const auto& item = installed.at("partitions")[i];
@@ -249,7 +270,11 @@ void verify_installed_disk(const json& binding, const fs::path& directory, const
             throw std::runtime_error("Invalid immutable GPT partition layout.");
         layout.partitions.push_back({roles[i], uuid, next, length}); next += length;
     }
-    if (layout.partitions[3].lengthBytes != 4 * MiB || layout.partitions[4].lengthBytes < (8ULL << 30) ||
+    if (nativeAb) for (size_t i = 0; i < 6; ++i) {
+        const uint64_t expected = i % 3 == 0 ? 64 * MiB : (i % 3 == 1 ? 4096 * MiB : 512 * MiB);
+        if (layout.partitions[i].lengthBytes != expected) throw std::runtime_error("Native A/B slot capacity changed.");
+    }
+    if (layout.partitions[nativeAb ? 6 : 3].lengthBytes != 4 * MiB || layout.partitions.back().lengthBytes < (8ULL << 30) ||
         next != (layout.totalBytes - 33 * 512) / MiB * MiB)
         throw std::runtime_error("Installed GPT partitions do not consume the recorded total capacity.");
     const auto& boot = installed.at("directBoot");

@@ -1,0 +1,8 @@
+{
+  "producer": "https://github.com/kekeqwq/kikiaosp_test",
+  "formatVersion": 2,
+  "files": {
+    "manifest.schema.json": "1d37e76eccb40ed8e7f9f9eacd7b9e9ba9cbdc14e58ca866030304433b1507c1",
+    "source-lock.schema.json": "e45f2f6936ae2dd13caefe2ccb6f247010bf0fe70278eb3b38f35373f338f696"
+  }
+}

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <optional>
+#include <fstream>
 #include <stdexcept>
 
 namespace kiki {
@@ -148,6 +149,31 @@ ShellResult guest_shell(const OwnedProcess& qemu, uint16_t port, const std::stri
             pending.erase(0, 5 + size);
         }
     }
+}
+void guest_push_ota(const OwnedProcess& qemu,uint16_t port,const fs::path& source,const std::string& nonce,const Progress& progress) {
+    if(!valid_instance_uuid(nonce))throw std::runtime_error("Invalid OTA inbox identity.");
+    HANDLE input=CreateFileW(source.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+    if(input==INVALID_HANDLE_VALUE)throw std::runtime_error("Could not lock the offline OTA package.");
+    struct FileGuard{HANDLE h;~FileGuard(){CloseHandle(h);}} guard{input};BY_HANDLE_FILE_INFORMATION info{};
+    if(!GetFileInformationByHandle(input,&info)||(info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)))throw std::runtime_error("Offline OTA must be a regular nonredirected file.");
+    uint64_t length=(uint64_t(info.nFileSizeHigh)<<32)|info.nFileSizeLow;if(!length||length>(8ULL<<30))throw std::runtime_error("Offline OTA size exceeds bound.");
+    const std::string path="/data/local/tmp/kiki-ota/incoming-"+nonce+".ota.zip";
+    auto setup=guest_shell(qemu,port,"test ! -L /data/local/tmp/kiki-ota && mkdir -p /data/local/tmp/kiki-ota && chmod 755 /data/local/tmp/kiki-ota && test ! -e "+path,5000);
+    if(setup.exitCode)throw std::runtime_error("Guest OTA inbox exists or is redirected.");
+    Winsock stack;verify_target(qemu,port);Socket socket;socket.value=::socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
+    if(socket.value==INVALID_SOCKET)throw std::runtime_error("Could not create owned OTA transport.");auto deadline=GetTickCount64()+1800000;connect_loopback(socket.value,port,5000);verify_target(qemu,port);
+    std::string banner="host::features=shell_v2;";banner+='\0';send_packet(socket.value,deadline,CNXN,0x01000000,256*1024,banner);auto hello=read_packet(socket.value,deadline);
+    if(hello.command!=CNXN||(hello.a!=0x01000000&&hello.a!=0x01000001)||hello.b<4096||!hello.payload.starts_with("device::"))throw std::runtime_error("Offline OTA requires this exact private debug adbd.");
+    std::string service="sync:";service+='\0';send_packet(socket.value,deadline,OPEN,1,0,service);auto open=read_packet(socket.value,deadline);if(open.command!=OKAY||open.b!=1||!open.a)throw std::runtime_error("Guest refused OTA sync.");auto remote=open.a;std::string reply;
+    auto send=[&](const char* id,uint32_t size,const std::string& data){std::string body(8,'\0');std::copy_n(id,4,body.begin());put(body.data()+4,size);body+=data;send_packet(socket.value,deadline,WRTE,1,remote,body);
+        for(;;){auto p=read_packet(socket.value,deadline);if(p.a!=remote||p.b!=1)throw std::runtime_error("OTA sync stream identity changed.");if(p.command==OKAY)break;if(p.command!=WRTE||reply.size()+p.payload.size()>4096)throw std::runtime_error("OTA sync stream failed.");reply+=p.payload;send_packet(socket.value,deadline,OKAY,1,remote);if(reply.starts_with("FAIL"))throw std::runtime_error("Guest rejected OTA staging: "+reply.substr(8));}};
+    auto dest=path+",33188";send("SEND",static_cast<uint32_t>(dest.size()),dest);uint64_t sent=0,last=0;std::array<char,65536> buffer;
+    while(sent<length){DWORD got=0;auto count=static_cast<DWORD>(std::min<uint64_t>(buffer.size(),length-sent));if(!ReadFile(input,buffer.data(),count,&got,nullptr)||got!=count)throw std::runtime_error("Offline OTA changed/truncated while staging.");send("DATA",got,std::string(buffer.data(),got));sent+=got;
+        if(sent-last>=(16ULL<<20)){report(progress,"Staging signed full OTA: "+std::to_string(sent*100/length)+"%");verify_target(qemu,port);last=sent;}}
+    send("DONE",0,{});
+    while(reply.size()<8){auto p=read_packet(socket.value,deadline);if(p.command!=WRTE||p.a!=remote||p.b!=1||reply.size()+p.payload.size()>4096)throw std::runtime_error("Invalid OTA sync completion.");reply+=p.payload;send_packet(socket.value,deadline,OKAY,1,remote);}
+    if(reply.size()!=8||reply.substr(0,4)!="OKAY"||word(reply.data()+4)!=0)throw std::runtime_error("Guest failed OTA sync completion.");
+    send_packet(socket.value,deadline,CLSE,1,remote);verify_target(qemu,port);report(progress,"Offline package staged. The SAME KikiUpdater/update_engine will authenticate and install it.");
 }
 void qmp_powerdown(const OwnedProcess& qemu, uint16_t port) {
     Winsock stack; verify_target(qemu, port); Socket socket; socket.value = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);

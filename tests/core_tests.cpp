@@ -9,6 +9,7 @@
 #include <winioctl.h>
 #include "../src/kikiemu/runtime.hpp"
 #include "../src/kikiemu/disk.hpp"
+#include "../src/kikiemu/ab.hpp"
 #include "../src/kikiemu/boot.hpp"
 #include "../src/kikiemu/storage.hpp"
 #include "../src/kikiemu/lifecycle.hpp"
@@ -247,11 +248,29 @@ int wmain(int argc, wchar_t** argv) {
         for (const auto& mutation : contractFixtures.at("negativeMutations")) {
             auto bad = contractValid;
             bad[nlohmann::json::json_pointer(mutation.at("pointer").get<std::string>())] = mutation.at("value");
+            if(mutation.at("name")=="requires-newer-launcher") bad["minimumLauncherVersion"]="0.4.0-alpha";
             rejects([&] { validate_manifest(bad); }, mutation.at("name").get_ref<const std::string&>().c_str());
         }
         rejects([] { validate_schema(1, {{"anyOf", nlohmann::json::array()}}); }, "future schema vocabulary silently ignored");
         rejects([] { validate_schema(1, {{"$ref", "https://untrusted.invalid/schema"}}); }, "external schema reference fetched/accepted");
-        check(!version_supported("0.2.0") && version_supported("0.2.0-alpha") && version_supported("0.1.0-alpha") && version_supported("0.0.9"), "alpha launcher version ordering and 0.1 backward compatibility");
+        check(!version_supported("0.3.0") && version_supported("0.3.0-alpha") && version_supported("0.2.0-alpha") && version_supported("0.1.0-alpha") && version_supported("0.0.9"), "0.3 alpha launcher version ordering");
+        {
+            auto layout=plan_disk(32ULL<<30,{{"boot",4096},{"system",8192},{"vendor",4096}},8ULL<<30,true);
+            check(layout.partitions.size()==8&&layout.partitions[0].name=="boot_a"&&layout.partitions[3].name=="boot_b"&&layout.partitions.back().name=="userdata","native physical A/B plus shared userdata");
+            check(layout.partitions[0].lengthBytes==(64ULL<<20)&&layout.partitions[1].lengthBytes==(4ULL<<30)&&layout.partitions[2].lengthBytes==(512ULL<<20),"native independent growth budgets");
+            rejects([]{plan_disk(16ULL<<30,{{"boot",4096},{"system",8192},{"vendor",4096}},8ULL<<30,true);},"native slots do not steal minimum userdata budget");
+            rejects([]{plan_disk(32ULL<<30,{{"boot",4096},{"system",5ULL<<30},{"vendor",4096}},8ULL<<30,true);},"native image exceeds slot budget");
+            std::array<unsigned char,32> c{};c[0]='_';c[1]='a';c[4]=0x42;c[5]=0x43;c[6]=0x41;c[7]=0x42;c[8]=1;c[9]=2;c[12]=0x9e;c[14]=0x2f;
+            auto seal=[&]{auto v=crc32(c.data(),28);for(int i=0;i<4;++i)c[28+i]=v>>(8*i);};seal();
+            check(select_ab_slot(c)==1&&c[1]=='b'&&c[14]==0x1f,"native chooses new highest-priority slot and consumes try");
+            check(select_ab_slot(c)==1&&c[14]==0x0f,"native final trial remains bootable for this attempt");
+            check(select_ab_slot(c)==0&&c[12]==0x9e,"native exhausted trial automatically falls back to successful slot");
+            auto bad=c;bad[28]^=1;rejects([&]{select_ab_slot(bad);},"native CRC corruption is not silently reset");
+            c[12]=c[14]=0;seal();rejects([&]{select_ab_slot(c);},"native no valid slot retains disk rather than guessing");
+            check(parse_command({L"update",L"--id",L"01",L"--action",L"check"}).name=="update","native automatic check has no source/target arguments");
+            rejects([]{parse_command({L"update",L"--id",L"01",L"--action",L"apply"});},"native offline import requires signed package path");
+            rejects([]{parse_command({L"update",L"--id",L"01",L"--action",L"check",L"--package",L"x"});},"native check cannot choose manual source/target file");
+        }
         check(version_supported("0.1.0-alpha.2", "0.1.0-alpha.10"), "numeric prerelease ordering");
         rejects([] { version_supported("0.1.0-alpha.01"); }, "noncanonical numeric prerelease accepted");
         check(sha256_text("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "text SHA-256 known vector");

@@ -83,6 +83,7 @@ Command parse_command(const std::vector<std::wstring>& args) {
         {"create", {"system", "storage", "size", "qemu", "performance"}},
         {"set", {"id", "default", "qemu", "mem", "cpus", "performance"}},
         {"start", {"id"}}, {"stop", {"id"}}, {"info", {"id"}},
+        {"update", {"id", "action", "package"}},
         {"logs", {"id"}}, {"doctor", {"qemu"}}, {"delete", {"id", "force"}}, {"adb", {"id", "shell"}}
     };
     auto permitted = allowed.find(name);
@@ -121,6 +122,11 @@ Command parse_command(const std::vector<std::wstring>& args) {
     }
     if (name == "info" || name == "logs" || name == "stop" || name == "delete") require("id");
     if (name == "adb") { require("id"); require("shell"); }
+    if (name == "update") {
+        require("id"); require("action");const auto action=utf8(result.options.at("action"));
+        if (action!="status"&&action!="check"&&action!="apply"&&action!="reboot") throw std::runtime_error("Update action must be status, check, apply or reboot.");
+        if (action=="apply") require("package");else if(result.options.contains("package")) throw std::runtime_error("Only offline apply accepts --package.");
+    }
     if (name == "delete" && !result.options.contains("force"))
         throw std::runtime_error("Deletion permanently removes all instance data. Use delete --force --id NN.");
     if (name == "create" || name == "set") resources(result);

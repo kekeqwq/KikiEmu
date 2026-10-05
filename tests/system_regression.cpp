@@ -72,12 +72,12 @@ void prepare(const fs::path& archive, const fs::path& bin, const fs::path& root,
             sizes[role] = item.at("bytes").get<uint64_t>(); hashes[role] = item.at("sha256").get<std::string>();
         }
         const auto minimum = package.manifest.at("minimumDataBytes").get<uint64_t>();
-        plan_disk(total, sizes, minimum);
+        plan_disk(total, sizes, minimum, package.manifest.at("layoutVersion") == "gpt-ab-v1");
         auto instanceOwner = create_storage(root / "instance", new_instance_uuid(), "release", protectedTrees);
         json disk;
         {
             StorageLease instanceLease(instanceOwner, protectedTrees), staged(package.stagingOwner);
-            disk = install_disk(binding, instanceOwner.directory / "disk", total, package.payloads, minimum, hashes);
+            disk = install_disk(binding, instanceOwner.directory / "disk", total, package.payloads, minimum, hashes, {}, package.manifest.at("layoutVersion") == "gpt-ab-v1");
         }
         delete_storage(package.stagingOwner, {instanceOwner.directory, app, bin, archive}, [] {});
         json source{{"manifest", package.manifest}, {"sourceLock", package.sourceLock},
@@ -180,6 +180,10 @@ int wmain(int argc, wchar_t** argv) {
     try {
         if (argc == 6 && std::wstring(argv[1]) == L"--prepare") {
             prepare(normalize_directory(argv[2]), normalize_directory(argv[3]), normalize_directory(argv[4]), parse_gib(argv[5])); return 0;
+        }
+        if ((argc==4||argc==5)&&std::wstring(argv[1])==L"--ota") {
+            auto root=normalize_directory(argv[2]);LoadedFixture loaded(kiki_test::validate_system_fixture(read_record(root / "system-regression.json"),root,self_executable().parent_path()));
+            verify_guest_identity(loaded.fixture);std::cout<<instance_update(loaded.fixture.manager,loaded.fixture.id,utf8(argv[3]),argc==5?normalize_directory(argv[4]):fs::path{},[](const std::string& s){std::cerr<<s<<'\n';});return 0;
         }
         if ((argc == 3 || argc == 4) && (std::wstring(argv[1]) == L"--boot" || std::wstring(argv[1]) == L"--describe" ||
              std::wstring(argv[1]) == L"--shutdown" || std::wstring(argv[1]) == L"--shell" || std::wstring(argv[1]) == L"--close-window")) {

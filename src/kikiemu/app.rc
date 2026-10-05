@@ -3,8 +3,8 @@
 1 ICON "assets/kikiemu.ico"
 1 RT_MANIFEST "src/kikiemu/app.manifest"
 1 VERSIONINFO
- FILEVERSION 0,2,0,0
- PRODUCTVERSION 0,2,0,0
+ FILEVERSION 0,3,0,0
+ PRODUCTVERSION 0,3,0,0
  FILEOS VOS_NT_WINDOWS32
  FILETYPE VFT_APP
 BEGIN
@@ -14,9 +14,9 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "Kiki\0"
       VALUE "FileDescription", "KikiEmu - Native Windows ARM64 Android Launcher\0"
-      VALUE "FileVersion", "0.2.0-alpha\0"
+      VALUE "FileVersion", "0.3.0-alpha\0"
       VALUE "ProductName", "KikiEmu\0"
-      VALUE "ProductVersion", "0.2.0-alpha\0"
+      VALUE "ProductVersion", "0.3.0-alpha\0"
       VALUE "LegalCopyright", "KikiEmu contributors; GPL-2.0-or-later\0"
     END
   END

@@ -4,6 +4,7 @@
 #include <windows.h>
 #include "session.hpp"
 #include "disk.hpp"
+#include "ab.hpp"
 #include <cmath>
 #include <fstream>
 #include <optional>
@@ -168,7 +169,7 @@ bool display_power_ready(const std::string& power, const std::string& display) {
     return std::regex_search(power, awake) && std::regex_search(display, screenOn);
 }
 RuntimePlan runtime_plan(const json& record, const ManagerPaths& paths, const std::string& session,
-                         uint16_t adb, uint16_t qmp, uint16_t camera) {
+                         uint16_t adb, uint16_t qmp, uint16_t camera, const json& nativeBoot) {
     auto owner = parse_storage_identity(record.at("owner"));
     if (!valid_instance_uuid(session) || owner.channel != paths.channel || !adb || !qmp || !camera ||
         adb == qmp || adb == camera || qmp == camera)
@@ -177,7 +178,12 @@ RuntimePlan runtime_plan(const json& record, const ManagerPaths& paths, const st
         throw std::runtime_error("Runtime cannot reuse development/global ADB ports.");
     const auto& layout = record.at("immutableSource").at("layout");
     auto bootUuid = layout.at("partitions").at(0).at("uuid").get<std::string>();
-    if (layout.at("partitions").at(0).at("name") != "boot" || !valid_instance_uuid(bootUuid))
+    bool nativeAb = layout.at("layoutVersion") == "gpt-ab-v1";
+    if (nativeAb) {
+        if (nativeBoot.empty()) throw std::runtime_error("Native A/B requires a verified boot selection.");
+        bootUuid = nativeBoot.at("bootUuid").get<std::string>();
+    }
+    if ((!nativeAb && layout.at("partitions").at(0).at("name") != "boot") || !valid_instance_uuid(bootUuid))
         throw std::runtime_error("Runtime requires the installed boot partition UUID.");
     const auto& resources = record.at("configuration").at("resources");
     const auto cpus = resources.at("cpus").get<uint32_t>();
@@ -195,9 +201,22 @@ RuntimePlan runtime_plan(const json& record, const ManagerPaths& paths, const st
         L"androidboot.init_fatal_reboot_target=none androidboot.adb.secure=0 binder.devices=binder,hwbinder,vndbinder "
         L"androidboot.boot_part_uuid=" + utf16(bootUuid) + L" androidboot.serialno=" + utf16(plan.serial);
     auto log = fs::path("logs") / utf16(session);
+    if (nativeAb) {
+        auto token=owner.directory / "disk/userdata-uninitialized.json";
+        auto initialized=owner.directory / "userdata-initialized.json";
+        bool first=fs::exists(token)&&!fs::exists(initialized);
+        if(first) {
+            if(fs::file_size(token)>256||(GetFileAttributesW(token.c_str())&FILE_ATTRIBUTE_REPARSE_POINT)) throw std::runtime_error("Native first-format token invalid.");
+            std::ifstream in(token);std::string text((std::istreambuf_iterator<char>(in)),{});
+            if(parse_json_document(text)!=json{{"diskUuid",layout.at("diskUuid")}}) throw std::runtime_error("Native first-format token belongs to another disk.");
+        }
+        command += L" androidboot.slot_suffix=" + utf16(nativeBoot.at("suffix").get<std::string>()) + L" androidboot.kiki_first_boot=" + (first?L"1":L"0") + L" androidboot.kiki_ota_rollback=" + (nativeBoot.value("rollback",false)?L"1":L"0");
+    }
+    const auto kernel = nativeAb ? log / "ab-boot/boot/kernel" : fs::path("disk/boot/kernel");
+    const auto ramdisk = nativeAb ? log / "ab-boot/boot/ramdisk.img" : fs::path("disk/boot/ramdisk.img");
     plan.arguments = {L"-L", (bin / "roms").wstring(), L"-M", L"virt", L"-accel", L"whpx", L"-cpu", L"host",
         L"-m", std::to_wstring(memoryMiB), L"-smp", std::to_wstring(cpus), L"-parallel", L"none",
-        L"-kernel", L"disk/boot/kernel", L"-initrd", L"disk/boot/ramdisk.img", L"-append", command,
+        L"-kernel", kernel.wstring(), L"-initrd", ramdisk.wstring(), L"-append", command,
         L"-drive", L"if=none,file=disk/phone.qcow2,format=qcow2,id=kiki-phone,discard=unmap,detect-zeroes=unmap",
         L"-device", L"virtio-blk-pci,drive=kiki-phone", L"-device", L"virtio-gpu-gl-pci,hostmem=256M,xres=1003,yres=1556",
         L"-device", L"virtio-multitouch-pci", L"-device", L"virtio-keyboard-pci",
@@ -212,6 +231,7 @@ RuntimePlan runtime_plan(const json& record, const ManagerPaths& paths, const st
         L"-serial", L"file:" + (log / "serial.log").wstring(),
         L"-audiodev", L"sdl,id=kiki_audio,out.buffer-length=20000,out.buffer-count=4",
         L"-device", L"virtio-sound-pci,audiodev=kiki_audio,streams=1"};
+    if (nativeAb) plan.arguments.push_back(L"-no-reboot");
     plan.environment = {{L"KIKI_SDL_GUEST_REFRESH_RATE_HZ", L"120"}, {L"KIKI_SDL_SWAP_INTERVAL", L"0"},
         {L"KIKI_SDL_DISABLE_GRAB", L"1"}, {L"KIKI_SDL_DISABLE_IME", L"1"}, {L"KIKI_SDL_RAW_KEYBOARD_TRACE", L"0"},
         {L"KIKI_SDL_NATIVE_PIXELS", L"1"}, {L"KIKI_SDL_START_WIDTH", L"1003"}, {L"KIKI_SDL_START_HEIGHT", L"1556"},
@@ -287,7 +307,25 @@ std::string instance_shell(const ManagerPaths& paths, const std::string& id, con
     if (result.exitCode) throw std::runtime_error("Guest command exited with " + std::to_string(result.exitCode) + ": " + result.error + result.output);
     return result.output + result.error;
 }
-void supervise_instance(const ManagerPaths& paths, const std::string& id, const std::string& session) {
+std::string instance_update(const ManagerPaths& paths,const std::string& id,const std::string& action,const fs::path& package,const Progress& progress) {
+    if(action!="status"&&action!="check"&&action!="apply"&&action!="reboot") throw std::runtime_error("Invalid update action.");
+    json record;{RegistryTransaction registry(paths.registryRoot,paths.channel);record=registry.instance(id);}
+    if(record.at("immutableSource").at("layout").at("layoutVersion")!="gpt-ab-v1") throw std::runtime_error("Native OTA requires a NEW 0.3 A/B instance; no legacy disk conversion/data deletion.");
+    auto qemu=qemu_process(record);auto port=endpoint(record,"adb",qemu.pid);std::string extra;
+    if(action=="apply") {const auto nonce=new_instance_uuid();guest_push_ota(qemu,port,package,nonce,progress);extra=" --es path /data/local/tmp/kiki-ota/incoming-"+nonce+".ota.zip";}
+    auto result=instance_shell(paths,id,"am broadcast --receiver-foreground -a com.kiki.updater.CONTROL -n com.kiki.updater/.ControlReceiver --es command "+action+extra);
+    if(action=="apply") {
+        auto expected=extra.substr(std::string(" --es path /data/local/tmp/kiki-ota/incoming-").size(),36);
+        auto deadline=GetTickCount64()+180000;
+        while(GetTickCount64()<deadline){auto state=guest_shell(qemu,port,"getprop sys.kiki.ota.imported",5000);
+            if(!state.exitCode&&trim(state.output)==expected){auto clean=guest_shell(qemu,port,"rm -f /data/local/tmp/kiki-ota/incoming-"+expected+".ota.zip",5000);if(clean.exitCode)throw std::runtime_error("Could not remove this owned OTA inbox file.");return result;}
+            Sleep(500);
+        }
+        throw std::runtime_error("Updater did not acknowledge its durable private copy. Original guest inbox retained; see OTA status/logs.");
+    }
+    return result;
+}
+void supervise_instance(const ManagerPaths& paths, const std::string& id, const std::string& session, unsigned recoveryAttempt) {
     json record;
     update(paths, id, session, [&](json& current) {
         bool self = false;
@@ -302,6 +340,8 @@ void supervise_instance(const ManagerPaths& paths, const std::string& id, const 
     auto bin = fs::path(utf16(record.at("configuration").at("qemu").at("binDirectory").get<std::string>()));
     const auto log = session_logs(record);
     std::string failure;
+    json nativeBoot = json::object();
+    bool otaRebootRequested = false, reachedReady = false;
     try {
         StorageLease lease(owner, {paths.registryRoot, paths.appRoot, bin});
         RuntimePins pins;
@@ -311,7 +351,13 @@ void supervise_instance(const ManagerPaths& paths, const std::string& id, const 
         pins.add(owner.directory / "disk/boot/kernel"); pins.add(owner.directory / "disk/boot/ramdisk.img");
         verify_installed_disk(record.at("configuration").at("qemu"), owner.directory / "disk", record.at("immutableSource").at("layout"), log / "disk-validation");
         PortReservation adb, qmp, camera;
-        auto plan = runtime_plan(record, paths, session, adb.port(), qmp.port(), camera.port());
+        nativeBoot = prepare_ab_boot(record.at("configuration").at("qemu"), owner.directory / "disk", record.at("immutableSource").at("layout"), log);
+        if (!nativeBoot.empty()) {
+            nativeBoot["rollback"] = recoveryAttempt > 0 || fs::exists(log / "ab-boot/trial-0/invalid-boot.txt") || fs::exists(log / "ab-boot/trial-0/invalid-image.txt");
+            pins.add(log / "ab-boot", true); pins.add(log / "ab-boot/boot", true);
+            pins.add(log / "ab-boot/boot/kernel"); pins.add(log / "ab-boot/boot/ramdisk.img");
+        }
+        auto plan = runtime_plan(record, paths, session, adb.port(), qmp.port(), camera.port(), nativeBoot);
         CloseRequest closeRequest(session);
         if (inspect_pe(plan.camera).machine != 0xaa64) throw std::runtime_error("Missing native ARM64 camera bridge.");
         write_status(log, "WAITING", "Booting Android; waiting for its independent ADB transport");
@@ -377,6 +423,16 @@ void supervise_instance(const ManagerPaths& paths, const std::string& id, const 
             std::ofstream initialized(owner.directory / "display-initialized.json"); initialized << "{\"profileVersion\":1}\n";
             if (!initialized) throw std::runtime_error("Could not persist initial display profile.");
         }
+        if (!nativeBoot.empty()) {
+            if (shell("getprop ro.boot.slot_suffix") != nativeBoot.at("suffix").get<std::string>()) throw std::runtime_error("Guest booted a different native slot.");
+            shell("bootctl mark-boot-successful");
+            if(!fs::exists(owner.directory / "userdata-initialized.json")) {
+                std::ofstream marker(owner.directory / "userdata-initialized.json");marker<<json{{"diskUuid",record.at("immutableSource").at("layout").at("diskUuid")}}.dump()<<'\n';
+                if(!marker) throw std::runtime_error("Could not persist native no-wipe marker.");
+            }
+        }
+        if (!nativeBoot.empty()) shell("setprop sys.kiki.ota.boot_verified 1");
+        reachedReady = true;
         auto verified = "Android " + shell("getprop ro.build.version.release") + " | Linux " + shell("uname -r") + " | SDL / VirGL / 120 Hz | HOME visible";
         update(paths, id, session, [&](json& current) { current["lifecycle"] = "running"; });
         write_status(log, "READY", "System started successfully - opening Android", verified);
@@ -384,7 +440,10 @@ void supervise_instance(const ManagerPaths& paths, const std::string& id, const 
         bool shutdownRequested = false;
         uint64_t nextShutdownAttempt = 0;
         while (qemu.running()) {
-            if (closeRequest.requested() && !shutdownRequested && GetTickCount64() >= nextShutdownAttempt) {
+            if (!nativeBoot.empty() && !shutdownRequested) {
+                try { otaRebootRequested = shell("getprop sys.kiki.ota.reboot") == "1"; } catch (...) {}
+            }
+            if ((closeRequest.requested() || otaRebootRequested) && !shutdownRequested && GetTickCount64() >= nextShutdownAttempt) {
                 write_status(log, "SHUTTING_DOWN", "Saving Android data and shutting down; please wait");
                 update(paths, id, session, [&](json& current) { current["lifecycle"] = "stopping"; });
                 try {
@@ -414,6 +473,30 @@ void supervise_instance(const ManagerPaths& paths, const std::string& id, const 
         current["runtime"]["processes"] = json::array(); current["runtime"]["endpoints"] = json::array();
         current["lifecycle"] = "idle"; current["lastError"] = failure.empty() ? json(nullptr) : json(failure);
     });
+    bool nativeAb = record.at("immutableSource").at("layout").at("layoutVersion") == "gpt-ab-v1";
+    bool restart = nativeAb && otaRebootRequested && failure.empty();
+    if (nativeAb && !otaRebootRequested && failure.empty()) {
+        // -no-reboot turns guest RESET into process exit. Only a kernel reboot
+        // marker, never an unexplained exit or shutdown, requests a cold start.
+        std::ifstream serial(log / "serial.log", std::ios::binary);
+        serial.seekg(0, std::ios::end);auto size=serial.tellg();
+        if (size>0) { serial.seekg(std::max<std::streamoff>(0,static_cast<std::streamoff>(size)-65536));
+            std::string tail((std::istreambuf_iterator<char>(serial)),{});
+            restart = tail.find("reboot: Restarting system") != std::string::npos && tail.find("reboot: Power down") == std::string::npos; }
+    }
+    bool fallback = nativeAb && !failure.empty() && !nativeBoot.empty() && !reachedReady;
+    if (restart || (fallback && recoveryAttempt < 2)) {
+        StorageLease lease(owner, {paths.registryRoot, paths.appRoot, bin});
+        if (fallback) fail_ab_slot(record.at("configuration").at("qemu"), owner.directory / "disk", record.at("immutableSource").at("layout"), nativeBoot.at("slot").get<int>(), log);
+        const auto next = new_instance_uuid();if (!fs::create_directory(owner.directory / "logs" / utf16(next))) throw std::runtime_error("A/B restart log creation failed.");
+        { RegistryTransaction registry(paths.registryRoot, paths.channel);auto& current=registry.instance(id);
+          if (current.at("lifecycle")!="idle") throw std::runtime_error("Instance changed during A/B restart.");
+          json self;for(const auto& p:record.at("runtime").at("processes"))if(p.at("role")=="supervisor"&&p.at("pid")==GetCurrentProcessId())self=p;
+          if(self.is_null()||!owned_process_is_live(parse_owned_process(self))) throw std::runtime_error("A/B supervisor identity changed.");
+          current["runtime"]={{"instanceUuid",owner.instanceUuid},{"channel",paths.channel},{"sessionUuid",next},{"processes",json::array({self})},{"endpoints",json::array()}};
+          current["lifecycle"]="starting";registry.save(); }
+        supervise_instance(paths,id,next,restart ? 0 : recoveryAttempt+1);return;
+    }
     if (!failure.empty()) throw std::runtime_error(failure);
 }
 } // namespace kiki

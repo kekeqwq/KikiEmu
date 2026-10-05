@@ -61,13 +61,13 @@ std::string create_instance(const Command& command, const ManagerPaths& paths, R
             sizes[role] = item.at("bytes").get<uint64_t>(); hashes[role] = item.at("sha256").get<std::string>();
         }
         const auto minimum = package.manifest.at("minimumDataBytes").get<uint64_t>();
-        plan_disk(capacity, sizes, minimum); // Reject insufficient TOTAL capacity before creating the target.
+        plan_disk(capacity, sizes, minimum, package.manifest.at("layoutVersion") == "gpt-ab-v1"); // Reject insufficient TOTAL capacity before creating the target.
         owner = create_storage(target, uuid, paths.channel, protect);
         json disk;
         {
             StorageLease destination(*owner, protect);
             StorageLease staged(package.stagingOwner);
-            disk = install_disk(binding, target / "disk", capacity, package.payloads, minimum, hashes, progress);
+            disk = install_disk(binding, target / "disk", capacity, package.payloads, minimum, hashes, progress, package.manifest.at("layoutVersion") == "gpt-ab-v1");
         }
         // Everything necessary is now in the standalone disk/cache. Nothing
         // at runtime depends on the original download or these extracted files.
@@ -108,7 +108,7 @@ ManagerPaths user_manager_paths() {
     return {root / "KikiEmu" / "release", fs::path(executable).parent_path(), "release"};
 }
 const char* management_help() {
-    return "KikiEmu 0.2.0-alpha\n"
+    return "KikiEmu 0.3.0-alpha\n"
            "  kikiemu create --system ZIP --storage NEW_FOLDER --size 200g --qemu QEMU_BIN [--performance default|medium|high]\n"
            "  kikiemu list\n"
            "  kikiemu set --default ID\n"
@@ -119,6 +119,8 @@ const char* management_help() {
            "  kikiemu stop --id ID\n"
            "  kikiemu logs --id ID\n"
            "  kikiemu adb --id ID --shell COMMAND\n"
+           "  kikiemu update --id ID --action status|check|reboot\n"
+           "  kikiemu update --id ID --action apply --package SIGNED_FULL_OTA_ZIP\n"
            "  kikiemu delete --force --id ID\n"
            "Commands also accept --create, --list, --set and --delete spellings.\n"
            "Size is immutable TOTAL GiB; disks allocate host space as used.\n"
@@ -126,7 +128,7 @@ const char* management_help() {
 }
 std::string execute_management(const Command& command, const ManagerPaths& paths, const Progress& progress) {
     if (command.name == "help") return management_help();
-    if (command.name == "version") return "KikiEmu 0.2.0-alpha (Windows ARM64)\n";
+    if (command.name == "version") return "KikiEmu 0.3.0-alpha (Windows ARM64)\n";
     if (command.name == "doctor") {
         if (!command.options.contains("qemu")) throw std::runtime_error("Use doctor --qemu QEMU_BIN.");
         return prepare_qemu(normalize_directory(command.options.at("qemu")), progress).dump(2) +
@@ -136,6 +138,7 @@ std::string execute_management(const Command& command, const ManagerPaths& paths
     if (command.name == "stop") return stop_instance(paths, value(command, "id"));
     if (command.name == "logs") return instance_logs(paths, value(command, "id"));
     if (command.name == "adb") return instance_shell(paths, value(command, "id"), value(command, "shell"));
+    if (command.name == "update") return instance_update(paths, value(command,"id"), value(command,"action"), command.options.contains("package") ? normalize_directory(command.options.at("package")) : fs::path{}, progress);
     RegistryTransaction registry(paths.registryRoot, paths.channel);
     if (command.name == "create") return create_instance(command, paths, registry, progress);
     if (command.name == "list") {

@@ -15,7 +15,7 @@ struct DiskLayout {
     std::vector<Partition> partitions;
 };
 DiskLayout plan_disk(uint64_t totalBytes, const std::map<std::string, uint64_t>& payloadBytes,
-                     uint64_t minimumDataBytes);
+                     uint64_t minimumDataBytes, bool nativeAb = false);
 nlohmann::json layout_json(const DiskLayout& layout);
 uint32_t crc32(const unsigned char* data, size_t size);
 
@@ -26,7 +26,7 @@ nlohmann::json install_disk(const nlohmann::json& qemuBinding, const fs::path& n
                            uint64_t totalBytes, const std::map<std::string, fs::path>& payloads,
                            uint64_t minimumDataBytes,
                            const std::map<std::string, std::string>& manifestHashes = {},
-                           const Progress& progress = {});
+                           const Progress& progress = {}, bool nativeAb = false);
 // Before the FIRST writer is started: compare qcow2 format/capacity/backing,
 // both GPT tables and direct-boot caches with the immutable installation
 // record. Userdata is mutable and is deliberately NOT hashed or reformatted.

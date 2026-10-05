@@ -45,9 +45,20 @@ $header += 'inline constexpr const char* sourceLockSchema = R"kikischema(' + $lo
 $header += 'inline constexpr const char* fixtures = R"kikischema(' + $fixtureJson + ')kikischema";' + "`n"
 $header += 'inline constexpr const char* manifestSha256 = "' + $pin.files.'format-1/manifest.schema.json' + '";' + "`n"
 $header += 'inline constexpr const char* sourceLockSha256 = "' + $pin.files.'format-1/source-lock.schema.json' + '";' + "`n"
-$header += 'inline constexpr const char* producerRevision = "' + $pin.revision + '";' + "`n}`n"
+$header += 'inline constexpr const char* producerRevision = "' + $pin.revision + '";' + "`n"
+$nativePin = Get-Content -LiteralPath (Join-Path $contractRoot 'format-2/PIN.json') -Raw | ConvertFrom-Json
+foreach ($pair in @(@('nativeManifestSchema','manifest.schema.json'),@('nativeLockSchema','source-lock.schema.json'))) {
+    $path = Join-Path $contractRoot ('format-2/' + $pair[1])
+    $hash = (Get-FileHash -LiteralPath $path).Hash.ToLowerInvariant()
+    if ($hash -cne $nativePin.files.($pair[1])) { throw 'Native contract pin mismatch' }
+    $text = [IO.File]::ReadAllText($path)
+    if ($text.Contains(')kikischema"')) { throw 'Native contract delimiter collision' }
+    $header += 'inline constexpr const char* ' + $pair[0] + ' = R"kikischema(' + $text + ')kikischema";' + "`n"
+    $header += 'inline constexpr const char* ' + $pair[0] + 'Hash = "' + $hash + '";' + "`n"
+}
+$header += "}`n"
 [IO.File]::WriteAllText((Join-Path $OutputDirectory 'package_contract.generated.hpp'), $header, [Text.UTF8Encoding]::new($false))
-$core = @('config', 'runtime', 'process', 'child', 'transport', 'boot', 'disk', 'storage', 'lifecycle', 'registry', 'schema', 'package', 'manager', 'session', 'installation') | ForEach-Object { Join-Path $repoRoot "src/kikiemu/$_.cpp" }
+$core = @('config', 'runtime', 'process', 'child', 'transport', 'boot', 'disk', 'storage', 'lifecycle', 'registry', 'schema', 'package', 'ab', 'manager', 'session', 'installation') | ForEach-Object { Join-Path $repoRoot "src/kikiemu/$_.cpp" }
 $flags = @('-std=c++20', '-O2', '-Wall', '-Wextra', '-static', '-municode', '-I', $OutputDirectory)
 $libs = @('-larchive', '-l:libz.dll.a', '-lbz2', '-llzma', '-lb2', '-llz4', '-lzstd', '-lcrypto', '-liconv', '-lcharset', '-lexpat', '-lpcre2-posix', '-lpcre2-8', '-lcrypt32', '-lbcrypt', '-lole32', '-lshell32', '-luuid', '-liphlpapi', '-lws2_32')
 # Compile the shared core once, then reuse it for every entry point.

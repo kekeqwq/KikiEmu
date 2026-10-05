@@ -201,7 +201,9 @@ void XMLCALL doctype(void* user, const XML_Char*, const XML_Char*, const XML_Cha
 const json& manifest_schema() { static auto value = parse_json_document(kiki_contract::manifestSchema); return value; }
 const json& source_lock_schema() { static auto value = parse_json_document(kiki_contract::sourceLockSchema); return value; }
 std::map<std::string, json> validate_manifest(const json& value) {
-    validate_schema(value, manifest_schema());
+    bool native = value.value("formatVersion", 0) == 2;
+    static auto nativeSchema = parse_json_document(kiki_contract::nativeManifestSchema);
+    validate_schema(value, native ? nativeSchema : manifest_schema());
     version_supported(value.at("systemVersion").get<std::string>(), value.at("systemVersion").get<std::string>());
     if (!version_supported(value.at("minimumLauncherVersion"))) throw std::runtime_error("System requires a newer KikiEmu reader.");
     std::map<std::string, json> records{{"manifest.json", nullptr}}; std::set<std::string> roles;
@@ -210,7 +212,7 @@ std::map<std::string, json> validate_manifest(const json& value) {
         auto role = item.at("role").get<std::string>(); auto bytes = item.at("bytes").get<uint64_t>();
         if (!roles.insert(role).second || item.at("path") != "payload/" + role + ".img" ||
             item.at("imageFormat") != (role == "boot" ? "android-boot-v4" : "raw-erofs") ||
-            item.at("partitionBytes") != (bytes + alignment - 1) / alignment * alignment)
+            item.at("partitionBytes") != (native ? (role == "boot" ? 64ULL << 20 : (role == "system" ? 4ULL << 30 : 512ULL << 20)) : (bytes + alignment - 1) / alignment * alignment) || bytes > item.at("partitionBytes").get<uint64_t>())
             throw std::runtime_error("Payload role/path/format/partition constraints are inconsistent.");
         records[item.at("path").get<std::string>()] = item; total += bytes;
     }
@@ -225,11 +227,13 @@ std::map<std::string, json> validate_manifest(const json& value) {
     return records;
 }
 void validate_source_lock(const json& value) {
-    validate_schema(value, source_lock_schema());
+    bool native = value.value("sourceLockVersion", 0) == 2;
+    static auto nativeSchema = parse_json_document(kiki_contract::nativeLockSchema);
+    validate_schema(value, native ? nativeSchema : source_lock_schema());
     auto xml = value.at("aosp").at("manifestXml").get<std::string>();
     if (xml.size() > 4194304 || sha256_text(xml) != value.at("aosp").at("manifestSha256").get<std::string>() ||
-        value.at("contract").at("manifestSchemaSha256") != kiki_contract::manifestSha256 ||
-        value.at("contract").at("sourceLockSchemaSha256") != kiki_contract::sourceLockSha256)
+        value.at("contract").at("manifestSchemaSha256") != (native ? kiki_contract::nativeManifestSchemaHash : kiki_contract::manifestSha256) ||
+        value.at("contract").at("sourceLockSchemaSha256") != (native ? kiki_contract::nativeLockSchemaHash : kiki_contract::sourceLockSha256))
         throw std::runtime_error("Pinned schema/AOSP source-lock identity mismatch.");
     XML_Parser parser = XML_ParserCreate("UTF-8");
     if (!parser) throw std::runtime_error("Could not allocate the provenance XML reader.");

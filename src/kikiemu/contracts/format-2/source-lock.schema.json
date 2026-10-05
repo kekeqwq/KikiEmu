@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kekeqwq/kikiaosp_test/contracts/format-2/source-lock.schema.json",
+  "title": "KikiAOSP format 2 source lock (implementation draft)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sourceLockVersion",
+    "contract",
+    "aosp",
+    "device",
+    "kernel",
+    "build"
+  ],
+  "properties": {
+    "sourceLockVersion": {
+      "type": "integer",
+      "const": 2
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "revision",
+        "manifestSchemaSha256",
+        "sourceLockSchemaSha256"
+      ],
+      "properties": {
+        "repository": {
+          "const": "https://github.com/kekeqwq/kikiaosp_test"
+        },
+        "revision": {
+          "$ref": "#/$defs/commit"
+        },
+        "manifestSchemaSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sourceLockSchemaSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "aosp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "branch",
+        "manifestXml",
+        "manifestSha256",
+        "projectCount"
+      ],
+      "properties": {
+        "branch": {
+          "const": "android17-release"
+        },
+        "manifestXml": {
+          "type": "string",
+          "minLength": 100,
+          "maxLength": 4194304
+        },
+        "manifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "projectCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        }
+      }
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "commit"
+      ],
+      "properties": {
+        "repository": {
+          "const": "https://github.com/kekeqwq/kikiaosp_test"
+        },
+        "commit": {
+          "$ref": "#/$defs/commit"
+        }
+      }
+    },
+    "kernel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "commit",
+        "flakeLockSha256",
+        "sourceVersion",
+        "imageSha256"
+      ],
+      "properties": {
+        "repository": {
+          "const": "https://github.com/kekeqwq/kikiaosp_kernel"
+        },
+        "commit": {
+          "$ref": "#/$defs/commit"
+        },
+        "flakeLockSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sourceVersion": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[0-9]+[.][0-9]+[-A-Za-z0-9._]*$"
+        },
+        "imageSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cleanSource",
+        "independentOutput",
+        "outputRecipe",
+        "tools"
+      ],
+      "properties": {
+        "cleanSource": {
+          "const": true
+        },
+        "independentOutput": {
+          "const": true
+        },
+        "outputRecipe": {
+          "const": "kikiaosp-release-v1"
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mkbootfsSha256",
+            "mkbootimgSha256",
+            "mkfsErofsSha256"
+          ],
+          "properties": {
+            "mkbootfsSha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "mkbootimgSha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "mkfsErofsSha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "commit": {
+      "type": "string",
+      "minLength": 40,
+      "maxLength": 40,
+      "pattern": "^[0-9a-f]{40}$"
+    }
+  }
+}
