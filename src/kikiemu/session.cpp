@@ -178,7 +178,7 @@ RuntimePlan runtime_plan(const json& record, const ManagerPaths& paths, const st
         throw std::runtime_error("Runtime cannot reuse development/global ADB ports.");
     const auto& layout = record.at("immutableSource").at("layout");
     auto bootUuid = layout.at("partitions").at(0).at("uuid").get<std::string>();
-    bool nativeAb = layout.at("layoutVersion") == "gpt-ab-v1";
+    bool nativeAb = layout.value("layoutVersion", "gpt-v1") == "gpt-ab-v1";
     if (nativeAb) {
         if (nativeBoot.empty()) throw std::runtime_error("Native A/B requires a verified boot selection.");
         bootUuid = nativeBoot.at("bootUuid").get<std::string>();
