@@ -1,7 +1,7 @@
 # KikiEmu 0.1 Alpha — Windows ARM64
 
 This is the 0.1 Alpha guide. Do not substitute a development disk/bundle for
-the clean system ZIP. See [release details and limitations](RELEASE_0_1_ALPHA.md).
+the clean system ZIP. See [0.3 release details and limitations](RELEASE_0_3_ALPHA.md).
 
 ## What to obtain
 
@@ -133,9 +133,9 @@ Platform Tools and selects the recorded instance directly.
 ## Future development and system versions
 
 The published 0.1/0.2 packages use the historical format-1 disk layout.
-The private 0.3 candidate introduces a NEW format-2 physical A/B baseline;
-it does not convert or erase an existing 0.2 instance. No 0.3 public Release
-is available yet.
+0.3 introduces a NEW format-2 physical A/B baseline;
+it does not convert or erase an existing 0.2 instance. Download its matching
+[launcher and system releases](RELEASE_0_3_ALPHA.md).
 A separate Dev channel/registry/launcher and mandatory release/Dev concurrency
 test are no longer required. The existing per-instance UUID, process and
 endpoint checks remain: this is simpler development, not permission to stop
@@ -147,6 +147,11 @@ replace an installed OS or resize a disk. Published assets remain immutable;
 a repair is a new version, not new bytes under an old version's filename.
 
 ## Native updates (NEW 0.3 A/B instances only)
+
+0.3 is released from completed engineering tests at the user's instruction.
+User-side real online OTA acceptance is deferred until a future 0.4 update;
+that acceptance is not claimed complete. The 0.3 baseline is already sequence4,
+so its same-sequence FULL OTA is not a newer update.
 
 Open Android **Settings > System > System update**. The English updater checks
 `kekeqwq/kikiaosp_test` GitHub Releases and selects the highest compatible,

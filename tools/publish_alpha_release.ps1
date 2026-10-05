@@ -11,14 +11,15 @@ $ErrorActionPreference='Stop'
 $planPath=(Resolve-Path -LiteralPath $Plan).Path
 $planHash=(Get-FileHash $planPath).Hash.ToLowerInvariant()
 $spec=Get-Content -LiteralPath $planPath -Raw | ConvertFrom-Json
-if ($spec.version -ne '0.1.0-alpha' -or $spec.releases.Count -ne 2) { throw 'Expected the explicit two-repository Alpha plan.' }
+if ($spec.version -notin @('0.1.0-alpha','0.2.0-alpha','0.3.0-alpha') -or $spec.releases.Count -ne 2) { throw 'Expected an explicit supported two-repository Alpha plan.' }
+$expectedTag='v'+$spec.version
 $seen=@{}
 foreach ($release in $spec.releases) {
     if ($release.repository -notin @('kekeqwq/KikiEmu','kekeqwq/kikiaosp_test') -or $seen.ContainsKey($release.repository) -or
-        $release.tag -ne 'v0.1.0-alpha' -or $release.commit -notmatch '^[0-9a-f]{40}$') { throw 'Unexpected repository/tag/revision.' }
+        $release.tag -ne $expectedTag -or $release.commit -notmatch '^[0-9a-f]{40}$') { throw 'Unexpected repository/tag/revision.' }
     $seen[$release.repository]=$true
     $names=@{}
-    $required=if ($release.repository -eq 'kekeqwq/KikiEmu') {'setup.exe'} else {'KikiAOSP-0.1.0-alpha-arm64.zip'}
+    $required=if ($release.repository -eq 'kekeqwq/KikiEmu') {'setup.exe'} elseif ($spec.version -eq '0.3.0-alpha') {'KikiAOSP-0.3.0-alpha-arm64-ab.zip'} else {'KikiAOSP-'+$spec.version+'-arm64.zip'}
     if ($release.assets.Count -lt 3 -or -not ($release.assets.path | Where-Object { [IO.Path]::GetFileName($_) -eq $required })) {
         throw 'Each release requires its primary download plus source/provenance assets.'
     }
@@ -61,7 +62,7 @@ function Api([string]$Path,[string]$Method='Get',$Body=$null) {
 }
 function Find-Release([string]$Repository) {
     $releases=Api "repos/$Repository/releases?per_page=100"
-    $found=@($releases | Where-Object tag_name -eq 'v0.1.0-alpha')
+    $found=@($releases | Where-Object tag_name -eq $expectedTag)
     if ($found.Count -gt 1) { throw 'Duplicate release identity.' }
     if ($found.Count -eq 1) { return $found[0] }
     return $null

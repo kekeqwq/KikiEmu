@@ -1,4 +1,4 @@
-# 0.3 原生全量 OTA（实施中，未发布）
+# 0.3 原生全量 OTA（用户授权工程实测发版）
 
 ## 新基线
 
@@ -50,7 +50,7 @@ Nix GC 后恢复同一 derivation 的 Image 与原字节不同；构建记录明
 
 **当前仍是 userdebug / unlocked direct boot，不声称 AVB Verified Boot 或抵御宿主/guest root 篡改。**
 A/B 回退系统槽不自动回退数据库迁移，发行方须验证数据兼容，不承诺任意大版本跨越或任意容量增长。
-所有 NONRELEASE 目标仅用于私有回归，不创建测试公开 Release。
+此前 NONRELEASE 目标仅用于私有回归，未创建公开测试 Release。现获用户 0.3 发版授权：提升实际测试 sequence4 的目录/下载地址为发布版，保留原已签名 payload 和镜像字节。
 
 ## 验收状态
 
@@ -79,4 +79,4 @@ A/B 回退系统槽不自动回退数据库迁移，发行方须验证数据兼�
 仍未实际验收：断电/强制宿主崩溃、两个 boot image 同时损坏、userdata mount-failure no-wipe 故障。
 GitHub 自动检查实际无新已签名候选路径通过；未创建公开测试 Release，正向在线自动下载路径未实际验收。
 签名/打包/VINTF、真实安装、UI 显示与用户人工确认分别记录；不把运行候选当全部发布门禁通过。
-没有 main/tag/公开 Release 或 setup 执行授权。
+用户现已授权 main/tag/0.3 Release，依据工程实测发版；用户端真实在线升级人工验收明确留待未来 0.4，不冒称已通过。setup.exe 仍仅编译，未由 agent 执行。发布说明见 [RELEASE_0_3_ALPHA.md](../RELEASE_0_3_ALPHA.md)。
