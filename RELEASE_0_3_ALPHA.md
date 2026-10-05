@@ -16,7 +16,7 @@
   Creating the 0.3 baseline is separate from later data-preserving OTA.
 - QEMU is unchanged from the audited 0.2 native ARM64 five-patch runtime.
   If you already use that runtime, no new QEMU rebuild is required for 0.3.
-  Otherwise follow [QEMU_BUILD.md](QEMU_BUILD.md). QEMU is not in setup.exe.
+  Otherwise follow [QEMU_BUILD.md](https://github.com/kekeqwq/KikiEmu/blob/v0.3.0-alpha/QEMU_BUILD.md). QEMU is not in setup.exe.
 
 ## Phone-style native FULL OTA
 
