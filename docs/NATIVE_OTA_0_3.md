@@ -41,7 +41,12 @@ CLI `update --id ID --action status|check|reboot`，离线辅助
 原生引擎使用专属 `system/etc/update_engine/kiki-otacerts.zip`；缺失该证书库必须失败，不能回退成允许 unsigned。
 不为了 OTA 改无关 APK/platform 签名身份。Android 的 public testkey 不是 Kiki 原生 OTA 的授权发布者。
 `package-native-ab.py` 从实际审计的 release 构建和 matching target-files 生成全量 signed payload，检查实际系统属性、证书库和三分区集合。
-内核是同一份已审计 rc6 Nix 产物；Android kernel/target-files 依赖有独立的生成输入记录，不向 device 源偷偷添加私钥或二进制。
+内核保留此前已审计、实际启动的 rc6 Image；Android kernel/target-files 有独立生成输入记录，不向 device 源添加私钥或二进制。
+Nix GC 后恢复同一 derivation 的 Image 与原字节不同；构建记录明确 `byteReproducible: false`，
+通过精确历史包/source-lock/boot 和 retained Image 收据核验原产物，不把重建结果冒称原字节或偷偷替换。
+源码包从实际 shipped Image 提取内嵌配置，分别保留实际配置与声明输入。
+自有 7.3 kernel matrix 检查实际 built-in 驱动并声明 shipping FCM 202604；完整 VINTF 检查通过，未使用 skip-compatibility。
+这不是官方 GKI/LTS/VTS 认证。
 
 **当前仍是 userdebug / unlocked direct boot，不声称 AVB Verified Boot 或抵御宿主/guest root 篡改。**
 A/B 回退系统槽不自动回退数据库迁移，发行方须验证数据兼容，不承诺任意大版本跨越或任意容量增长。
@@ -49,6 +54,19 @@ A/B 回退系统槽不自动回退数据库迁移，发行方须验证数据兼�
 
 ## 验收状态
 
-宿主源码已实现并通过 344 个内部 core checks；这不等于真实系统 OTA 通过。
-候选系统仍在实际构建，须完成 NEW 实例启动、应用/设置/文件保留、坏签名/设备/中断/新槽失败回退等实际回归，
-再留下运行中的候选供用户人工测试。没有 main/tag/公开 Release 或 setup 执行授权。
+宿主实际编译通过 344 个内部 core checks。NEW format-2 候选已真实 READY，Settings 与 CLI 共用原生引擎。
+同一个 32 GiB 实例已实际安装 publisher-signed FULL OTA：NONRELEASE sequence 1→2→3，
+冷重启槽 A→B→A，新槽 successful、目标序列确认、pending/stage 清理；未重建实例或格式化 userdata。
+测试 APK 字节/UID、应用私有数据、文件、font_scale、旋转设置和自定义设置跨两次真实升级保持。
+前置认证坏签名、已签名错误 device/layout 和 downgrade 已拒绝；不把这些当 native payload-signature 负向验收。
+
+更新页面、通知及错误为英文。实际用户发现导航栏挡住按钮、浅色状态栏图标不可读后，
+已通过真实 OTA 安装系统 APK 修正：WindowInsets 安全区、可滚动信息区、固定安全按钮区、系统 DayNight 配色及明暗系统栏图标。
+浅色和深色均有实际截图/Activity view bounds 验证；最后按钮底部 1441px，小于导航栏顶部 1470px。
+已恢复原浅色模式，留下运行中的候选供人工确认，没有 updater APK overlay 冒充系统升级。
+
+仍待独立真实门禁：安装中断续装、坏 native payload signature、失败槽回退/两槽损坏、低空间。
+首次低空间 harness 未制造出低空间，实际走了正常成功安装；此项不算 PASS。
+GitHub 自动检查实际无新已签名候选路径通过；未创建公开测试 Release，正向在线自动下载路径未实际验收。
+签名/打包/VINTF、真实安装、UI 显示与用户人工确认分别记录；不把运行候选当全部发布门禁通过。
+没有 main/tag/公开 Release 或 setup 执行授权。

@@ -1,6 +1,7 @@
 # 0.3 全量 OTA：新基线与入口讨论
 
-状态：**已开始实际实现普通 A/B、Kiki 更新客户端和共享原生 CLI；候选构建/真实 OTA 回归尚未完成，不发版。**
+状态：**普通 A/B、Kiki 更新客户端和共享原生 CLI 已实现并实际构建；同实例全量 OTA 1→2→3、冷换槽和数据保留通过，英文/安全区/明暗配色候选已运行待人工确认。其余恢复/负向/在线门禁仍未全部验收，不发版。**
+下文保留最初入口讨论；旧基线评估不代表当前原生候选缺少 updater/update_engine。
 实现与当前边界见 [原生 OTA 实施说明](NATIVE_OTA_0_3.md)。
 此前 [0.2 基底增量方案](INCREMENTAL_OTA_DESIGN.md) 保留作历史，不再作为实施目标。
 
@@ -31,7 +32,7 @@ KikiEmu CLI -> 实例专属受控接口 -------+                   -> 校验/待
 
 ### CLI：离线、自动化与恢复入口（建议）
 
-- 保留 `kikiemu update --id 01 --ota ~/Downloads/0.6.ota.zip` 的离线包入口。
+- 实际离线入口为 `kikiemu update --id 01 --action apply --package SIGNED_FULL.ota.zip`。
 - 通过本实例受控接口提交到相同 update_engine；不另写一套绕过校验的宿主刷分区算法。
 - 状态查询、日志、待重启提示与设置页一致；实例内更新互斥，不能同时发起两次更新。
 - guest 无法启动时，CLI 的恢复能力另行设计为选择已验证备用槽/受信恢复环境。
@@ -47,16 +48,16 @@ KikiEmu CLI -> 实例专属受控接口 -------+                   -> 校验/待
 
 因此 Settings 提供的是入口/状态展示接口，不是一个已经包含 Kiki 更新源、下载、签名、安装和回滚的通用程序。
 需要提供系统级 Kiki 更新客户端并实现该 intent；无需把 Google 的专有 updater/GMS 当成前提。
-当前实际 installed-files 没有匹配的 update_engine/update_verifier/boot-control 服务可执行文件；
+评估当时的旧 format-1 rc6 installed-files 没有匹配的 update_engine/update_verifier/boot-control 服务可执行文件；
 存在 `libboot_control_client.so` 或 `otacerts.zip` 不表示已有完整 A/B 能力。
 
 ## 0.3 基线必须补齐的核心，而非只接两个按钮
 
 1. A/B 启动及系统布局、合理增长预算、共享 userdata；或完整 Virtual A/B 动态分区/快照方案。
-   普通 A/B 与 Virtual A/B 的选择仍需设计评估；包为全量与槽机制是两个独立问题。
+   已选普通物理 A/B；包为全量与槽机制是两个独立问题。
 2. 原生 update_engine、boot_control、成功标记/有限启动尝试、失败回退，及标准签名 target-files/OTA 管线。
 3. 启动器必须加载所选槽的真实 boot/kernel/ramdisk。现有 `session.cpp` 固定 direct-boot cache，
-   guest 内重启不能被假定为自动加载新槽内核；需实现可信启动选择及宿主/guest 重启闭环。
+   guest 内重启不能被假定为自动加载新槽内核；新原生实现已实际验证可信启动选择及宿主/guest 冷重启闭环。
 4. 启动前/启动时系统完整性校验及密钥策略；不能以现有 permissive/orange 启动参数冒称 Verified Boot 已实现。
 5. 断电/宿主退出/CLI退出、下载损坏、错误签名、安装失败、新槽无法启动、跨版数据保留的真实回归。
 6. A/B 默认仅回退系统槽，**不会自动回退 userdata 数据库迁移**。必须另定数据兼容、备份及失败回退策略。
