@@ -148,7 +148,7 @@ a repair is a new version, not new bytes under an old version's filename.
 
 ## Native updates (NEW 0.3 A/B instances only)
 
-0.3.1 is the authorized storage-accounting hotfix, sequence5. Existing0.3
+0.3.1 is the authorized storage-accounting and native checkpoint-startup hotfix, sequence5. Existing0.3
 sequence4 instances can now test a genuine public online upgrade to0.3.1;
 the user's manual acceptance is NOT claimed already passed. The0.3 launcher
 remains compatible. A fresh0.3.1 baseline is already sequence5 and correctly

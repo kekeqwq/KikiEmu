@@ -1,6 +1,6 @@
 # KikiEmu / KikiAOSP 0.3.1 Alpha
 
-Authorized storage-accounting hotfix; native publisher sequence **5**.
+Authorized storage-accounting and native OTA startup hotfix; native publisher sequence **5**.
 
 ## Updating an existing 0.3 instance
 
@@ -9,6 +9,12 @@ On a format-2 physical A/B 0.3 instance, open **Settings → System → System u
 The existing 0.3 launcher remains compatible with this OTA. The 0.3.1 launcher installer is optional version-matched delivery, not a prerequisite for updating Android. The full baseline ZIP is for NEW instances only, never a replacement for an existing userdata disk. Fresh 0.3.1 instances are already sequence5 and correctly reject the same-sequence OTA. There is no 0.2 disk migration or userdata formatting.
 
 User-side real online OTA acceptance can now be performed using **0.3 → 0.3.1**, rather than waiting for 0.4. Engineering regression results and a user's manual acceptance are distinct; this release does not claim the user's acceptance has happened.
+
+## Native OTA startup repair
+
+An initial unpublished engineering candidate installed successfully but rebooted during checkpoint commit. Its userdata mounted correctly; this was not a partition-layout or userdata-format migration. The failure was traced to vold receiving `commitChanges()` before `needsCheckpoint/prepareCheckpoint` initialized its normal boot lifecycle. On this physical A/B product, filesystem-checkpoint flags are absent, so fs_mgr and apexd do not provide a deterministic initialization call.
+
+0.3.1 explicitly runs the standard vold `prepareCheckpoint` API synchronously after userdata mounting and early Boot HAL startup, before framework startup. Preparation failure aborts startup; the regular checkpoint commit, boot-success checks and native rollback behavior remain required. No checkpoint bypass, early forced boot success, counter reset, disk replacement or userdata formatting is used. This repair is delivered in the signed native FULL OTA, which updates the system slots while keeping the original userdata disk.
 
 ## Storage correction
 
