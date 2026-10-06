@@ -11,7 +11,7 @@ $ErrorActionPreference='Stop'
 $planPath=(Resolve-Path -LiteralPath $Plan).Path
 $planHash=(Get-FileHash $planPath).Hash.ToLowerInvariant()
 $spec=Get-Content -LiteralPath $planPath -Raw | ConvertFrom-Json
-if ($spec.version -notin @('0.1.0-alpha','0.2.0-alpha','0.3.0-alpha') -or $spec.releases.Count -ne 2) { throw 'Expected an explicit supported two-repository Alpha plan.' }
+if ($spec.version -notin @('0.1.0-alpha','0.2.0-alpha','0.3.0-alpha','0.3.1-alpha') -or $spec.releases.Count -ne 2) { throw 'Expected an explicit supported two-repository Alpha plan.' }
 $expectedTag='v'+$spec.version
 $seen=@{}
 foreach ($release in $spec.releases) {
@@ -19,7 +19,7 @@ foreach ($release in $spec.releases) {
         $release.tag -ne $expectedTag -or $release.commit -notmatch '^[0-9a-f]{40}$') { throw 'Unexpected repository/tag/revision.' }
     $seen[$release.repository]=$true
     $names=@{}
-    $required=if ($release.repository -eq 'kekeqwq/KikiEmu') {'setup.exe'} elseif ($spec.version -eq '0.3.0-alpha') {'KikiAOSP-0.3.0-alpha-arm64-ab.zip'} else {'KikiAOSP-'+$spec.version+'-arm64.zip'}
+    $required=if ($release.repository -eq 'kekeqwq/KikiEmu') {'setup.exe'} elseif ($spec.version -in @('0.3.0-alpha','0.3.1-alpha')) {'KikiAOSP-'+$spec.version+'-arm64-ab.zip'} else {'KikiAOSP-'+$spec.version+'-arm64.zip'}
     if ($release.assets.Count -lt 3 -or -not ($release.assets.path | Where-Object { [IO.Path]::GetFileName($_) -eq $required })) {
         throw 'Each release requires its primary download plus source/provenance assets.'
     }

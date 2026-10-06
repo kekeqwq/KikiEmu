@@ -15,7 +15,7 @@ Unicode true
 !ifndef OUTPUT
 !error "Supply an OUTPUT setup.exe path"
 !endif
-Name "KikiEmu 0.3 Alpha"
+Name "KikiEmu 0.3.1 Alpha"
 OutFile "${OUTPUT}"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
@@ -24,11 +24,11 @@ ManifestDPIAware true
 InstallDir "$LOCALAPPDATA\Programs\KikiEmu"
 Icon "${PAYLOAD}\kikiemu.ico"
 UninstallIcon "${PAYLOAD}\kikiemu.ico"
-VIProductVersion "0.3.0.0"
+VIProductVersion "0.3.1.0"
 VIAddVersionKey /LANG=1033 "ProductName" "KikiEmu"
-VIAddVersionKey /LANG=1033 "ProductVersion" "0.3.0-alpha"
+VIAddVersionKey /LANG=1033 "ProductVersion" "0.3.1-alpha"
 VIAddVersionKey /LANG=1033 "FileDescription" "KikiEmu setup (ARM64 applications)"
-VIAddVersionKey /LANG=1033 "FileVersion" "0.3.0.0"
+VIAddVersionKey /LANG=1033 "FileVersion" "0.3.1.0"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "KikiEmu contributors"
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TEXT "Install the native Windows ARM64 KikiEmu CLI and desktop entry for this user.$\r$\n$\r$\nSystem packages and your own compatible QEMU runtime are separate downloads/builds. No Android disk or QEMU is installed by setup.$\r$\n$\r$\nClose KikiEmu instances before updating. Uninstall keeps all system instances and data."
@@ -122,8 +122,8 @@ Section "Install"
   CreateShortcut "$SMPROGRAMS\KikiEmu\KikiEmu.lnk" "$INSTDIR\kikiemu-desktop.exe" "" "$INSTDIR\kikiemu.ico"
   CreateShortcut "$DESKTOP\KikiEmu.lnk" "$INSTDIR\kikiemu-desktop.exe" "" "$INSTDIR\kikiemu.ico"
   CreateShortcut "$SMPROGRAMS\KikiEmu\Uninstall KikiEmu.lnk" "$INSTDIR\uninstall.exe"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KikiEmu" "DisplayName" "KikiEmu 0.3 Alpha"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KikiEmu" "DisplayVersion" "0.3.0-alpha"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KikiEmu" "DisplayName" "KikiEmu 0.3.1 Alpha"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KikiEmu" "DisplayVersion" "0.3.1-alpha"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KikiEmu" "Publisher" "KikiEmu contributors"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KikiEmu" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\KikiEmu" "UninstallString" '$\"$INSTDIR\uninstall.exe$\"'

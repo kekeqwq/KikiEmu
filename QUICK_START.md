@@ -1,12 +1,12 @@
-# KikiEmu 0.1 Alpha — Windows ARM64
+# KikiEmu 0.3.1 Alpha — Windows ARM64
 
-This is the 0.1 Alpha guide. Do not substitute a development disk/bundle for
-the clean system ZIP. See [0.3 release details and limitations](RELEASE_0_3_ALPHA.md).
+Use the audited format-2 system ZIP, not a development disk/bundle.
+See [0.3.1 release details and limitations](RELEASE_0_3_1_ALPHA.md).
 
 ## What to obtain
 
-1. `setup.exe` from the [KikiEmu release](https://github.com/kekeqwq/KikiEmu/releases/tag/v0.1.0-alpha).
-2. `KikiAOSP-0.1.0-alpha-arm64.zip` from the [kikiaosp_test release](https://github.com/kekeqwq/kikiaosp_test/releases/tag/v0.1.0-alpha).
+1. `setup.exe` from the [KikiEmu release](https://github.com/kekeqwq/KikiEmu/releases/tag/v0.3.1-alpha).
+2. `KikiAOSP-0.3.1-alpha-arm64-ab.zip` from the [kikiaosp_test release](https://github.com/kekeqwq/kikiaosp_test/releases/tag/v0.3.1-alpha).
 3. A compatible, privately deployed **native ARM64 patched QEMU bin directory**.
    QEMU is user-provided; setup does not install it or an Android disk.
 
@@ -30,7 +30,7 @@ Run setup.exe. It installs for the current user, without elevation, in
 and creates Start Menu/desktop entries. Open a **new** PowerShell window:
 
 ```powershell
-kikiemu create --system ~/Downloads/KikiAOSP-0.1.0-alpha-arm64.zip --storage ~/MyAndroid --size 200g --qemu ~/Repos/qemu/bin
+kikiemu create --system ~/Downloads/KikiAOSP-0.3.1-alpha-arm64-ab.zip --storage ~/MyAndroid --size 200g --qemu ~/Repos/qemu/bin
 kikiemu list
 kikiemu set --default 01
 ```
@@ -148,10 +148,11 @@ a repair is a new version, not new bytes under an old version's filename.
 
 ## Native updates (NEW 0.3 A/B instances only)
 
-0.3 is released from completed engineering tests at the user's instruction.
-User-side real online OTA acceptance is deferred until a future 0.4 update;
-that acceptance is not claimed complete. The 0.3 baseline is already sequence4,
-so its same-sequence FULL OTA is not a newer update.
+0.3.1 is the authorized storage-accounting hotfix, sequence5. Existing0.3
+sequence4 instances can now test a genuine public online upgrade to0.3.1;
+the user's manual acceptance is NOT claimed already passed. The0.3 launcher
+remains compatible. A fresh0.3.1 baseline is already sequence5 and correctly
+rejects its same-sequence FULL OTA. No0.2 disk migration.
 
 Open Android **Settings > System > System update**. The English updater checks
 `kekeqwq/kikiaosp_test` GitHub Releases and selects the highest compatible,
