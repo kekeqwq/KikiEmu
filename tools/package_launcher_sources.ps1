@@ -16,6 +16,7 @@ $setup=(Resolve-Path -LiteralPath $SetupDirectory).Path
 $dependencies=(Resolve-Path -LiteralPath $DependencyDirectory).Path
 $candidate=Get-Content -LiteralPath (Join-Path $setup 'candidate.json') -Raw | ConvertFrom-Json
 if ($candidate.sourceCommit -ne $revision -or $candidate.setupSha256 -ne (Get-FileHash (Join-Path $setup 'setup.exe')).Hash.ToLowerInvariant()) { throw 'Installer does not match source revision/bytes.' }
+if ($candidate.version -notmatch '^0[.]3[.]1-alpha(?:-hotfix[.]1)?$') { throw 'Unsupported source-kit release identity.' }
 $prefix=Join-Path (Resolve-Path -LiteralPath $Msys2).Path 'clangarm64'
 $output=[IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) { throw 'Source packaging requires a NEW output directory.' }
@@ -50,7 +51,7 @@ foreach ($name in @('archive','bz2','lzma','b2','lz4','zstd','crypto','iconv','c
 Copy-Item -LiteralPath (Join-Path $prefix 'lib/libz.dll.a') -Destination (Join-Path $kit 'libraries')
 Copy-Item -LiteralPath (Join-Path $core 'zlib1.dll') -Destination (Join-Path $kit 'runtime')
 # Public provenance contains no developer home paths or credentials.
-$provenance=[ordered]@{version='0.3.1-alpha'; sourceCommit=$revision; compiler=$candidate.buildReceipts.core.compiler;
+$provenance=[ordered]@{version=$candidate.version; sourceCommit=$revision; compiler=$candidate.buildReceipts.core.compiler;
     target='aarch64-w64-windows-gnu'; setupSha256=$candidate.setupSha256; sourceArchiveSha256=(Get-FileHash $own).Hash.ToLowerInvariant();
     dependencies=$records; objects=@{}; libraries=@{}}
 foreach ($section in @('objects','libraries')) {
@@ -58,7 +59,7 @@ foreach ($section in @('objects','libraries')) {
 }
 [IO.File]::WriteAllText((Join-Path $kit 'source-provenance.json'),($provenance|ConvertTo-Json -Depth 12)+"`n")
 Copy-Item -LiteralPath (Join-Path $repo 'LICENSING.md') -Destination $kit
-$archive=Join-Path $output 'KikiEmu-0.3.1-alpha-source-kit.tar.gz'
+$archive=Join-Path $output ('KikiEmu-'+$candidate.version+'-source-kit.tar.gz')
 & $tar -czf $archive -C $output source-kit
 if ($LASTEXITCODE -ne 0) { throw 'Source kit compression failed.' }
 Write-Host "Source, dependency archives and relinkable application objects: $archive"

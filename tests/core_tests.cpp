@@ -711,10 +711,33 @@ int wmain(int argc, wchar_t** argv) {
                 {"resources", {{"cpus", uint32_t(8)}, {"memoryBytes", 4ULL << 30}}}}}};
         launchFixture["immutableSource"]["manifest"]["buildIdentity"]["displayVersion"] = "KikiAOSP 0.1 Alpha";
         auto plan = runtime_plan(launchFixture, manager, new_instance_uuid(), 60001, 60002, 60003);
-        check(plan.environment.at(L"KIKI_SDL_BOOT_DETAILS").find(L"KikiAOSP 0.1 Alpha |") == 0, "boot overlay preserves installed 0.1 system identity");
+        check(plan.environment.at(L"KIKI_SDL_BOOT_DETAILS").find(L"SDL / VirGL / 120 Hz |") == 0 &&
+              plan.environment.at(L"KIKI_SDL_BOOT_DETAILS").find(L"KikiAOSP") == std::wstring::npos,
+              "preboot overlay shows runtime parameters, not an unobserved system version");
         launchFixture["immutableSource"]["manifest"]["buildIdentity"]["displayVersion"] = "KikiAOSP 0.2 Alpha";
         auto nextPlan = runtime_plan(launchFixture, manager, new_instance_uuid(), 60001, 60002, 60003);
-        check(nextPlan.environment.at(L"KIKI_SDL_BOOT_DETAILS").find(L"KikiAOSP 0.2 Alpha |") == 0, "boot overlay reads installed system identity rather than launcher version");
+        check(nextPlan.environment.at(L"KIKI_SDL_BOOT_DETAILS") == plan.environment.at(L"KIKI_SDL_BOOT_DETAILS"),
+              "immutable installation version cannot masquerade as current post-OTA system version");
+        check(boot_version_summary("original display", "KIKI_0.3.1_ALPHA") == "KikiAOSP 0.3.1 Alpha",
+              "completed boot summary reads current guest incremental rather than initial package");
+        check(boot_version_summary("", "KIKI_0.3.0_ALPHA") == "KikiAOSP 0.3.0 Alpha",
+              "formatter supports current older systems without assuming latest catalog version");
+        check(boot_version_summary("", "KIKI_0.4_ALPHA") == "KikiAOSP 0.4 Alpha",
+              "running version formatting is not hardcoded to this hotfix");
+        check(boot_version_summary("Guest display", "custom-build") == "System build: Guest display",
+              "unknown build-number grammar keeps the guest's actual display identity");
+        check(boot_version_summary("", "custom-build") == "System build: custom-build",
+              "actual raw incremental is available when display property is absent");
+        check(boot_version_summary("", "") == "Version unavailable",
+              "unavailable version never falls back to host or baseline version");
+        check(boot_version_summary("bad\nREADY", "bad\rvalue") == "Version unavailable",
+              "multi-line properties cannot inject boot status");
+        check(boot_version_summary(std::string(193, 'a'), std::string("bad\0value", 9)) == "Version unavailable",
+              "oversize or binary metadata is not displayed as a version");
+        check(boot_version_summary("\x1b[31m", "KIKI_0.3.1_ALPHA-extra") == "System build: KIKI_0.3.1_ALPHA-extra",
+              "controls are refused and version grammar must match the whole current property");
+        check(boot_version_summary("  guest build  ", "") == "System build: guest build",
+              "safe metadata trims surrounding spaces without altering version content");
         const std::string homeWindow = "  mCurrentFocus=Window{abc123 u0 com.android.launcher3/com.android.launcher3.uioverrides.QuickstepLauncher}\n";
         const auto internalRoot = temp / "internal-system-fixture", internalApp = temp / "internal-app";
         auto rootFixtureOwner = createdOwner; rootFixtureOwner.directory = internalRoot;

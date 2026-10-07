@@ -5,6 +5,7 @@
 #include "session.hpp"
 #include "disk.hpp"
 #include "ab.hpp"
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <optional>
@@ -168,6 +169,22 @@ bool display_power_ready(const std::string& power, const std::string& display) {
     static const std::regex screenOn(R"((?:^|\n)[ \t]*mScreenState=ON[ \t\r]*(?:\n|$))");
     return std::regex_search(power, awake) && std::regex_search(display, screenOn);
 }
+std::string boot_version_summary(const std::string& displayId, const std::string& incremental) {
+    auto value = [](const std::string& text) {
+        if (text.size() > 192 || std::any_of(text.begin(), text.end(), [](unsigned char c) { return c < 32 || c >= 127; }))
+            return std::string{};
+        return trim(text);
+    };
+    auto display = value(displayId), build = value(incremental);
+    // This is a presentation of the running guest's property, not a host
+    // version constant, publisher authorization or an OTA success decision.
+    static const std::regex alpha(R"(KIKI_([0-9]{1,6}(?:\.[0-9]{1,6}){1,2})_ALPHA)");
+    std::smatch match;
+    if (std::regex_match(build, match, alpha)) return "KikiAOSP " + match[1].str() + " Alpha";
+    if (!display.empty()) return "System build: " + display;
+    if (!build.empty()) return "System build: " + build;
+    return "Version unavailable";
+}
 RuntimePlan runtime_plan(const json& record, const ManagerPaths& paths, const std::string& session,
                          uint16_t adb, uint16_t qmp, uint16_t camera, const json& nativeBoot) {
     auto owner = parse_storage_identity(record.at("owner"));
@@ -242,8 +259,9 @@ RuntimePlan runtime_plan(const json& record, const ManagerPaths& paths, const st
         {L"KIKI_SDL_BOOT_SERIAL", (plan.logDirectory / "serial.log").wstring()},
         {L"KIKI_SDL_BOOT_LOGCAT", (plan.logDirectory / "logcat.log").wstring()},
         {L"KIKI_SDL_BOOT_SETUP", (plan.logDirectory / "setup.log").wstring()},
-        {L"KIKI_SDL_BOOT_DETAILS", utf16(record.at("immutableSource").at("manifest").at("buildIdentity").at("displayVersion").get<std::string>()) +
-            L" | SDL / VirGL / 120 Hz | " + std::to_wstring(cpus) +
+        // Before the guest has booted, show only runtime parameters. The
+        // immutable installation manifest is provenance, not its OTA version.
+        {L"KIKI_SDL_BOOT_DETAILS", L"SDL / VirGL / 120 Hz | " + std::to_wstring(cpus) +
             L" vCPU / " + std::to_wstring(memoryMiB) + L" MiB | " + utf16(paths.channel)}};
     return plan;
 }
@@ -433,7 +451,29 @@ void supervise_instance(const ManagerPaths& paths, const std::string& id, const 
         }
         if (!nativeBoot.empty()) shell("setprop sys.kiki.ota.boot_verified 1");
         reachedReady = true;
-        auto verified = "Android " + shell("getprop ro.build.version.release") + " | Linux " + shell("uname -r") + " | SDL / VirGL / 120 Hz | HOME visible";
+        // Optional, read-only metadata for this exact boot. Failure to obtain a
+        // display version must not fail a successful boot or trigger rollback.
+        auto versionProperty = [&](const char* property) -> std::string {
+            try {
+                auto result = guest_shell(qemuOwner, adbPort, std::string("getprop ") + property, 2000);
+                if (!result.exitCode) return result.output;
+            } catch (const std::exception&) {}
+            std::ofstream output(log / "setup.log", std::ios::app);
+            output << "Version unavailable: " << property << '\n';
+            return {};
+        };
+        auto propertyValue = [&](const char* property) {
+            auto value = versionProperty(property);
+            // Remove only getprop's final line ending, not embedded/control
+            // characters. The pure formatter rejects malformed metadata.
+            if (!value.empty() && value.back() == '\n') value.pop_back();
+            if (!value.empty() && value.back() == '\r') value.pop_back();
+            return value;
+        };
+        const auto displayId = propertyValue("ro.build.display.id");
+        const auto incremental = propertyValue("ro.build.version.incremental");
+        auto verified = boot_version_summary(displayId, incremental) + " | Android " + shell("getprop ro.build.version.release") +
+            " | Linux " + shell("uname -r") + " | HOME visible";
         update(paths, id, session, [&](json& current) { current["lifecycle"] = "running"; });
         write_status(log, "READY", "System started successfully - opening Android", verified);
         icons.update(qemu.pid());

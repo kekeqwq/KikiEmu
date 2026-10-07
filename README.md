@@ -14,7 +14,11 @@
 
 ## 0.3.1 Alpha：存储统计与原生 OTA 启动修复
 
-[0.3.1 发布说明](RELEASE_0_3_1_ALPHA.md)：实际系统镜像和 userdata 已用量与 OTA/文件系统预留分别显示，不把预留虚报成已用或可写空间；不改分区、不格式化 userdata。启动时通过标准 vold API 完成 checkpoint 初始化，不跳过 commit 或强制成功。原 0.3 实例可通过同一原生更新器升级到 sequence5，现可用 **0.3 → 0.3.1** 做真实用户在线 OTA 验收，不宣称用户已经验收通过。原 0.3 launcher 可继续使用，kernel/QEMU 本轮不变。
+[0.3.1 发布说明](RELEASE_0_3_1_ALPHA.md)：实际系统镜像和 userdata 已用量与 OTA/文件系统预留分别显示，不把预留虚报成已用或可写空间；不改分区、不格式化 userdata。启动时通过标准 vold API 完成 checkpoint 初始化，不跳过 commit 或强制成功。原 0.3 实例可通过同一原生更新器升级到 sequence5，用户已反馈真实 **0.3 → 0.3.1** OTA 成功、0.3 的 bug 修复及系统版本 0.3.1；这是用户报告的人工验收，与工程测试及公开附件验证分开记录。原 0.3 launcher 可继续使用，kernel/QEMU 本轮不变。
+
+### 可选 launcher Hotfix 1
+
+[0.3.1 Alpha Hotfix 1](RELEASE_0_3_1_HOTFIX_1.md) 只修正启动摘要的版本显示：启动中不显示版本，系统启动验证完成后显示本次 guest 的真实版本。现有 QEMU/Android 不需更新，不要求重建实例或清数据，也不是 sequence6 OTA。独立 hotfix 的 `setup.exe` 是可选更新；原 0.3/0.3.1 附件不覆盖，修复会随下一正常版本包含。
 
 ## 0.3 Alpha：音频、rc6 与原生全量 OTA
 

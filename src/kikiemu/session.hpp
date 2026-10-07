@@ -21,6 +21,9 @@ RuntimePlan runtime_plan(const nlohmann::json& instance, const ManagerPaths& pat
 bool launcher_display_ready(const std::string& windowDump, const std::string& layers,
                             const std::string& displayDump);
 bool display_power_ready(const std::string& powerDump, const std::string& displayDump);
+// Running guest properties only. No immutable baseline/host version fallback.
+// Invalid/unavailable metadata is presentation-only, never a boot failure.
+std::string boot_version_summary(const std::string& displayId, const std::string& incremental);
 std::string start_instance(const ManagerPaths& paths, const std::string& requestedId = {});
 std::string stop_instance(const ManagerPaths& paths, const std::string& id);
 std::string instance_logs(const ManagerPaths& paths, const std::string& id);
